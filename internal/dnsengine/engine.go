@@ -41,6 +41,7 @@ type CertInfo struct {
 	CertPath      string    `json:"cert_path"`
 	KeyPath       string    `json:"key_path"`
 	IsSelfSigned  bool      `json:"is_self_signed"`
+	Warning       string    `json:"warning,omitempty"`
 }
 
 // Server coordinates DoT and DoH services with client token authentication.
@@ -248,12 +249,40 @@ func (s *Server) applyCertificate(cert *tls.Certificate, certPath, keyPath strin
 
 	daysRem := int(time.Until(x509Cert.NotAfter).Hours() / 24)
 
+	issuerStr := x509Cert.Issuer.CommonName
+	if len(x509Cert.Issuer.Organization) > 0 {
+		issuerStr = fmt.Sprintf("%s (%s)", x509Cert.Issuer.CommonName, strings.Join(x509Cert.Issuer.Organization, ", "))
+	}
+
+	warning := ""
+	issuerLower := strings.ToLower(issuerStr)
+	if strings.Contains(issuerLower, "cloudflare origin") {
+		warning = "Cloudflare Origin Certificates are NOT trusted by mobile OSes (Android/iOS Private DNS will reject this with 'Could not connect'). Issue a genuine Let's Encrypt certificate."
+	} else if x509Cert.Issuer.CommonName == x509Cert.Subject.CommonName {
+		warning = "Self-signed certificate in use. Android and iOS Private DNS require a trusted public CA certificate (e.g. Let's Encrypt)."
+	}
+
+	baseDomain := strings.ToLower(s.cfg.Server.Domain)
+	if baseDomain != "" {
+		hasWildcard := false
+		expectedWildcard := "*." + baseDomain
+		for _, name := range x509Cert.DNSNames {
+			if strings.ToLower(name) == expectedWildcard {
+				hasWildcard = true
+				break
+			}
+		}
+		if !hasWildcard && warning == "" {
+			warning = fmt.Sprintf("Certificate is missing wildcard SAN '%s'. Client subdomains (<token>.%s) will fail TLS validation.", expectedWildcard, baseDomain)
+		}
+	}
+
 	s.certMu.Lock()
 	s.activeCert = cert
 	s.certInfo = CertInfo{
 		Loaded:        true,
 		Subject:       x509Cert.Subject.CommonName,
-		Issuer:        x509Cert.Issuer.CommonName,
+		Issuer:        issuerStr,
 		DNSNames:      x509Cert.DNSNames,
 		NotBefore:     x509Cert.NotBefore,
 		NotAfter:      x509Cert.NotAfter,
@@ -261,6 +290,7 @@ func (s *Server) applyCertificate(cert *tls.Certificate, certPath, keyPath strin
 		CertPath:      certPath,
 		KeyPath:       keyPath,
 		IsSelfSigned:  x509Cert.Issuer.CommonName == x509Cert.Subject.CommonName,
+		Warning:       warning,
 	}
 	s.certMu.Unlock()
 
