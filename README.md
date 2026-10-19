@@ -84,13 +84,33 @@ gravity-dns/
    - `dns.yourdomain.com` &rarr; `A` record pointing to VPS IPv4.
    - `*.dns.yourdomain.com` &rarr; `A` record pointing to VPS IPv4 (Wildcard).
 
-### One-Command Automated Installation
-Run the interactive deployment script as root:
+### One-Liner Automated Installation
+Run the one-liner command directly on your Ubuntu 22.04 or 24.04 LTS server as `root`:
 
 ```bash
-git clone https://github.com/gravity-dns/gravity-dns.git /opt/gravity-dns
+bash <(curl -fsSL https://raw.githubusercontent.com/magicrana/gravity-dns/main/install.sh)
+```
+*Or via standard pipe:*
+```bash
+curl -fsSL https://raw.githubusercontent.com/magicrana/gravity-dns/main/install.sh | bash
+```
+
+### Unattended / Non-Interactive One-Liner (Automated CI/CD)
+To deploy without interactive prompts, pass environment variables inline:
+
+```bash
+sudo GRAVITY_NON_INTERACTIVE=true \
+     GRAVITY_DOMAIN="dns.yourdomain.com" \
+     GRAVITY_PUBLIC_IPV4="203.0.113.1" \
+     GRAVITY_ADMIN_PASS="MySecretAdminPass123" \
+     bash -c "$(curl -fsSL https://raw.githubusercontent.com/magicrana/gravity-dns/main/install.sh)"
+```
+
+### Alternatively, Clone & Run Manually:
+```bash
+git clone https://github.com/magicrana/gravity-dns.git /opt/gravity-dns
 cd /opt/gravity-dns
-sudo bash scripts/install.sh
+sudo bash install.sh
 ```
 
 The script will automatically:
