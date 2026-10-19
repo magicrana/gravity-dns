@@ -2,13 +2,18 @@ package dnsengine
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -125,16 +130,62 @@ func (s *Server) setupTLSConfig() *tls.Config {
 	}
 }
 
+// generateFallbackCert generates an in-memory self-signed wildcard TLS certificate.
+func generateFallbackCert(domain string) (*tls.Certificate, error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	dnsNames := []string{domain, "*." + domain, "localhost"}
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject: pkix.Name{
+			CommonName: domain,
+		},
+		DNSNames:              dnsNames,
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, err
+	}
+
+	return &tls.Certificate{
+		Certificate: [][]byte{derBytes},
+		PrivateKey:  priv,
+	}, nil
+}
+
 // ReloadCertificatesFromDisk attempts to load fullchain.pem and privkey.pem from configured paths.
+// If certificates are missing, it initializes a self-signed fallback wildcard TLS certificate.
 func (s *Server) ReloadCertificatesFromDisk() error {
 	certFile := s.cfg.DNS.TLSCertFile
 	keyFile := s.cfg.DNS.TLSKeyFile
 
-	if certFile == "" || keyFile == "" {
-		return errors.New("certificate file paths not configured")
+	var loadErr error
+	if certFile != "" && keyFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err == nil {
+			return s.applyCertificate(&cert, certFile, keyFile)
+		}
+		loadErr = err
+	} else {
+		loadErr = errors.New("certificate file paths not configured")
 	}
 
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	// Fallback to self-signed wildcard TLS certificate
+	domain := s.cfg.Server.Domain
+	if domain == "" {
+		domain = "dns.gravity.local"
+	}
+
+	fallback, err := generateFallbackCert(domain)
 	if err != nil {
 		s.certMu.Lock()
 		s.activeCert = nil
@@ -144,10 +195,12 @@ func (s *Server) ReloadCertificatesFromDisk() error {
 			KeyPath:  keyFile,
 		}
 		s.certMu.Unlock()
-		return fmt.Errorf("failed to load TLS keypair from disk: %w", err)
+		return fmt.Errorf("failed to load TLS keypair from disk and fallback generation failed: %w", err)
 	}
 
-	return s.applyCertificate(&cert, certFile, keyFile)
+	_ = s.applyCertificate(fallback, "in-memory (self-signed fallback)", "in-memory (self-signed fallback)")
+	log.Printf("[DNS] Notice: Let's Encrypt certificate not found at %s (%v). Initialized self-signed fallback TLS certificate for %s (*.%s).", certFile, loadErr, domain, domain)
+	return loadErr
 }
 
 // UpdateCertificate applies and persists new PEM-encoded certificate and private key.
@@ -296,7 +349,7 @@ func (s *Server) Start() error {
 
 		log.Printf("[DNS] DoH (DNS-over-HTTPS) engine listening on %s (/dns-query/{token})", dohAddr)
 		var err error
-		if len(s.tlsConfig.Certificates) > 0 {
+		if s.tlsConfig != nil && (s.tlsConfig.GetCertificate != nil || len(s.tlsConfig.Certificates) > 0) {
 			err = s.dohServer.ListenAndServeTLS("", "")
 		} else {
 			// Fallback to HTTP for dev/local or reverse-proxy setups
