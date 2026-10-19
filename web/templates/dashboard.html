@@ -847,6 +847,45 @@
                             <li>All connected home devices now stream seamlessly!</li>
                         </ol>
                     </div>
+
+                    <!-- WireGuard Tunnel Setup Card (VoIP & SIP Trunks) -->
+                    <div class="glass-panel rounded-2xl p-6 border border-indigo-500/30 bg-gradient-to-br from-indigo-950/20 to-darkbg space-y-4 md:col-span-2">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-lg">
+                                    🛡️
+                                </div>
+                                <div>
+                                    <div class="flex items-center gap-2">
+                                        <h3 class="text-base font-bold text-white">WireGuard UDP Tunnel</h3>
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">VOIP & SIP TRUNK</span>
+                                    </div>
+                                    <p class="text-xs text-slate-400">Full Layer-3 UDP/TCP tunnel for VoIP softphones (Zoiper, Grandstream) and PBX (Asterisk, FreePBX, 3CX).</p>
+                                </div>
+                            </div>
+                            <span class="hidden sm:inline-flex px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-semibold code-font border border-emerald-500/20">
+                                UDP :51820
+                            </span>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300">
+                            <div class="p-4 rounded-xl bg-darkbg border border-darkborder space-y-2">
+                                <span class="font-bold text-white block">Step 1: Run Server Provisioner</span>
+                                <p class="text-slate-400 leading-relaxed">SSH into your Bangladesh VPS and launch the automated WireGuard manager:</p>
+                                <div class="p-2.5 rounded-lg bg-black/60 border border-darkborder font-mono text-[11px] text-emerald-400 flex items-center justify-between">
+                                    <span>sudo bash /opt/gravity-dns/scripts/setup-wireguard.sh</span>
+                                </div>
+                                <p class="text-[11px] text-slate-500">Auto-installs WireGuard, enables sysctl forwarding, sets NAT firewall rules, and creates peers.</p>
+                            </div>
+                            <div class="p-4 rounded-xl bg-darkbg border border-darkborder space-y-2">
+                                <span class="font-bold text-white block">Step 2: Connect Phone / PBX / Softphone</span>
+                                <ul class="space-y-1.5 list-disc list-inside text-slate-300">
+                                    <li><strong>Android / iOS:</strong> Scan the QR code displayed in terminal using the WireGuard app.</li>
+                                    <li><strong>Asterisk / FreePBX:</strong> Import the generated config from <code class="text-indigo-300 code-font">/etc/wireguard/clients/sip-trunk.conf</code>.</li>
+                                    <li><strong>Persistent Keepalive:</strong> Pre-set to 25s for reliable SIP NAT pinholes across Indian telecom carriers.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </section>
         </main>

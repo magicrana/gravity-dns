@@ -425,6 +425,13 @@ fi
 HOOK_EOF
 chmod +x /etc/letsencrypt/renewal-hooks/deploy/gravitydns.sh
 
+# Setup helper scripts in /opt/gravity-dns/scripts
+mkdir -p /opt/gravity-dns/scripts
+if [ -d "${SCRIPT_DIR}/scripts" ]; then
+    cp -f "${SCRIPT_DIR}"/scripts/*.sh /opt/gravity-dns/scripts/ 2>/dev/null || true
+fi
+chmod +x /opt/gravity-dns/scripts/*.sh 2>/dev/null || true
+
 echo -e "\n${BOLD}=== Step 8: Firewall Configuration (UFW) ===${NC}"
 if command -v ufw &>/dev/null; then
     ufw status | grep -q "Status: active" && {
@@ -434,7 +441,8 @@ if command -v ufw &>/dev/null; then
         ufw allow 443/tcp comment "GravityDNS SNI Proxy" >/dev/null 2>&1 || true
         ufw allow 80/tcp comment "Certbot ACME" >/dev/null 2>&1 || true
         ufw allow 8080/tcp comment "GravityDNS Web Panel" >/dev/null 2>&1 || true
-        echo -e "${GREEN}Firewall rules configured for ports 853, 8443, 443, 80, 8080.${NC}"
+        ufw allow 51820/udp comment "WireGuard VPN Tunnel" >/dev/null 2>&1 || true
+        echo -e "${GREEN}Firewall rules configured for ports 853, 8443, 443, 80, 8080, 51820(UDP).${NC}"
     } || echo "UFW is not active, skipping firewall rule injection."
 fi
 
@@ -473,6 +481,9 @@ if [ "$IS_REINSTALL" = "true" ]; then
     echo -e "    - Logs:     ${BOLD}journalctl -u gravity.service -f${NC}"
     echo -e "    - Restart:  ${BOLD}systemctl restart gravity.service${NC}"
     echo -e "    - Config:   ${BOLD}/etc/gravity/gravity.yaml${NC}"
+    echo -e ""
+    echo -e "  WireGuard VPN Tunnel (SIP / VoIP / UDP):"
+    echo -e "    - Setup Tool: ${BOLD}sudo bash /opt/gravity-dns/scripts/setup-wireguard.sh${NC}"
     echo -e "${GREEN}${BOLD}========================================================================${NC}\n"
 else
     echo -e "\n${GREEN}${BOLD}========================================================================${NC}"
@@ -492,5 +503,8 @@ else
     echo -e "    - Logs:     ${BOLD}journalctl -u gravity.service -f${NC}"
     echo -e "    - Restart:  ${BOLD}systemctl restart gravity.service${NC}"
     echo -e "    - Config:   ${BOLD}/etc/gravity/gravity.yaml${NC}"
+    echo -e ""
+    echo -e "  WireGuard VPN Tunnel (SIP / VoIP / UDP):"
+    echo -e "    - Setup Tool: ${BOLD}sudo bash /opt/gravity-dns/scripts/setup-wireguard.sh${NC}"
     echo -e "${GREEN}${BOLD}========================================================================${NC}\n"
 fi
