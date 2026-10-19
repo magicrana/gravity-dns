@@ -77,7 +77,7 @@ case "$CHOICE" in
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -y
         apt-get install -y --no-install-recommends certbot python3-certbot-dns-cloudflare python3-pip
-        pip3 install --upgrade --break-system-packages "cloudflare>=2.3.1" >/dev/null 2>&1 || true
+        pip3 install --upgrade --break-system-packages certbot certbot-dns-cloudflare "cloudflare>=2.3.1" >/dev/null 2>&1 || true
 
         mkdir -p /root/.secrets/certbot
         if echo "${CF_TOKEN}" | grep -Eq '^[0-9a-fA-F]{37}$'; then

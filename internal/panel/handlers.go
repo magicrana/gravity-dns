@@ -450,7 +450,7 @@ func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 1. Ensure certbot and python3-certbot-dns-cloudflare are installed
+	// 1. Ensure certbot and python3-pip are installed
 	if _, err := exec.LookPath("certbot"); err != nil {
 		installCmd := exec.Command("apt-get", "update", "-y")
 		_ = installCmd.Run()
@@ -461,8 +461,11 @@ func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Ensure python3 cloudflare library supports modern API Tokens
-	_ = exec.Command("pip3", "install", "--upgrade", "--break-system-packages", "cloudflare>=2.3.1").Run()
+	// Ensure pip3 is installed and upgrade certbot-dns-cloudflare and cloudflare library so API Tokens work
+	if _, err := exec.LookPath("pip3"); err != nil {
+		_ = exec.Command("apt-get", "install", "-y", "--no-install-recommends", "python3-pip").Run()
+	}
+	_ = exec.Command("pip3", "install", "--upgrade", "--break-system-packages", "certbot-dns-cloudflare", "cloudflare>=2.3.1").Run()
 
 	secretDir := "/root/.secrets/certbot"
 	_ = os.MkdirAll(secretDir, 0700)
