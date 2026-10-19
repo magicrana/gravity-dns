@@ -105,7 +105,7 @@ func runAll(cfgPath string) {
 	}
 
 	sniEng := sniproxy.New(cfg, res)
-	panelEng := panel.NewServer(cfg, st, res)
+	panelEng := panel.NewServer(cfg, st, res, dnsEng)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -222,7 +222,7 @@ func runPanel(cfgPath string) {
 	if err != nil {
 		log.Fatalf("[PANEL] Resolver error: %v", err)
 	}
-	server := panel.NewServer(cfg, st, res)
+	server := panel.NewServer(cfg, st, res, nil)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

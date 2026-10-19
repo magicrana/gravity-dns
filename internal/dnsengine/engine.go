@@ -3,6 +3,7 @@ package dnsengine
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +24,20 @@ import (
 	"gravity-dns/internal/store"
 )
 
+// CertInfo provides human-readable certificate metadata for the Web UI.
+type CertInfo struct {
+	Loaded        bool      `json:"loaded"`
+	Subject       string    `json:"subject"`
+	Issuer        string    `json:"issuer"`
+	DNSNames      []string  `json:"dns_names"`
+	NotBefore     time.Time `json:"not_before"`
+	NotAfter      time.Time `json:"not_after"`
+	DaysRemaining int       `json:"days_remaining"`
+	CertPath      string    `json:"cert_path"`
+	KeyPath       string    `json:"key_path"`
+	IsSelfSigned  bool      `json:"is_self_signed"`
+}
+
 // Server coordinates DoT and DoH services with client token authentication.
 type Server struct {
 	cfg       *config.Config
@@ -28,6 +45,11 @@ type Server struct {
 	limiter   *limiter.Limiter
 	resolver  *resolver.Resolver
 	tlsConfig *tls.Config
+
+	// Dynamic TLS Certificate Management
+	certMu     sync.RWMutex
+	activeCert *tls.Certificate
+	certInfo   CertInfo
 
 	// DoT connection tracker (maps remote IP:Port -> SNI)
 	connMu  sync.RWMutex
@@ -59,64 +81,172 @@ func New(cfg *config.Config, st *store.Store, lim *limiter.Limiter, res *resolve
 		cancel:   cancel,
 	}
 
-	// Setup TLS configuration with wildcard cert and SNI tracking
-	tlsCfg, err := s.setupTLSConfig()
-	if err != nil {
-		log.Printf("[DNS] Notice: TLS certificates not yet loaded (%v). Testing self-signed fallback.", err)
-		tlsCfg = s.createFallbackTLSConfig()
-	}
-	s.tlsConfig = tlsCfg
+	// Try loading initial certificates from disk
+	_ = s.ReloadCertificatesFromDisk()
+
+	// Setup TLS configuration with dynamic certificate resolver and SNI tracking
+	s.tlsConfig = s.setupTLSConfig()
 
 	return s, nil
 }
 
 // setupTLSConfig initializes TLS with client hello hook to track connection SNI.
-func (s *Server) setupTLSConfig() (*tls.Config, error) {
-	certFile := s.cfg.DNS.TLSCertFile
-	keyFile := s.cfg.DNS.TLSKeyFile
-
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		return nil, err
-	}
-
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-			if hello.Conn != nil {
-				remoteAddr := hello.Conn.RemoteAddr().String()
-				s.connMu.Lock()
-				s.connSNI[remoteAddr] = connMeta{
-					sni:       hello.ServerName,
-					updatedAt: time.Now(),
-				}
-				s.connMu.Unlock()
-			}
-			return nil, nil // Uses default config & certs
-		},
-	}
-
-	return tlsConfig, nil
-}
-
-// createFallbackTLSConfig creates an ephemeral self-signed cert for testing/development.
-func (s *Server) createFallbackTLSConfig() *tls.Config {
+func (s *Server) setupTLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			if hello.Conn != nil {
-				remoteAddr := hello.Conn.RemoteAddr().String()
 				s.connMu.Lock()
-				s.connSNI[remoteAddr] = connMeta{
+				s.connSNI[hello.Conn.RemoteAddr().String()] = connMeta{
 					sni:       hello.ServerName,
 					updatedAt: time.Now(),
 				}
 				s.connMu.Unlock()
 			}
-			return nil, errors.New("no certificates configured")
+
+			s.certMu.RLock()
+			defer s.certMu.RUnlock()
+			if s.activeCert != nil {
+				return s.activeCert, nil
+			}
+			return nil, errors.New("no active TLS certificates loaded")
+		},
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			if hello.Conn != nil {
+				s.connMu.Lock()
+				s.connSNI[hello.Conn.RemoteAddr().String()] = connMeta{
+					sni:       hello.ServerName,
+					updatedAt: time.Now(),
+				}
+				s.connMu.Unlock()
+			}
+			return nil, nil // Uses default config & GetCertificate callback
 		},
 	}
+}
+
+// ReloadCertificatesFromDisk attempts to load fullchain.pem and privkey.pem from configured paths.
+func (s *Server) ReloadCertificatesFromDisk() error {
+	certFile := s.cfg.DNS.TLSCertFile
+	keyFile := s.cfg.DNS.TLSKeyFile
+
+	if certFile == "" || keyFile == "" {
+		return errors.New("certificate file paths not configured")
+	}
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		s.certMu.Lock()
+		s.activeCert = nil
+		s.certInfo = CertInfo{
+			Loaded:   false,
+			CertPath: certFile,
+			KeyPath:  keyFile,
+		}
+		s.certMu.Unlock()
+		return fmt.Errorf("failed to load TLS keypair from disk: %w", err)
+	}
+
+	return s.applyCertificate(&cert, certFile, keyFile)
+}
+
+// UpdateCertificate applies and persists new PEM-encoded certificate and private key.
+func (s *Server) UpdateCertificate(certPEM, keyPEM []byte) error {
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return fmt.Errorf("invalid TLS certificate or private key: %w", err)
+	}
+
+	// Determine storage path
+	certDir := filepath.Dir(s.cfg.DNS.TLSCertFile)
+	if certDir == "" || certDir == "." {
+		certDir = "configs/certs"
+	}
+	_ = os.MkdirAll(certDir, 0755)
+
+	targetCertPath := filepath.Join(certDir, "fullchain.pem")
+	targetKeyPath := filepath.Join(certDir, "privkey.pem")
+
+	if err := os.WriteFile(targetCertPath, certPEM, 0644); err != nil {
+		return fmt.Errorf("failed to write certificate file %s: %w", targetCertPath, err)
+	}
+	if err := os.WriteFile(targetKeyPath, keyPEM, 0600); err != nil {
+		return fmt.Errorf("failed to write private key file %s: %w", targetKeyPath, err)
+	}
+
+	// Update in-memory configuration
+	s.cfg.DNS.TLSCertFile = targetCertPath
+	s.cfg.DNS.TLSKeyFile = targetKeyPath
+	_ = config.SaveConfig(s.cfg)
+
+	// Apply certificate dynamically without service restart
+	return s.applyCertificate(&cert, targetCertPath, targetKeyPath)
+}
+
+func (s *Server) applyCertificate(cert *tls.Certificate, certPath, keyPath string) error {
+	if len(cert.Certificate) == 0 {
+		return errors.New("empty certificate chain")
+	}
+
+	x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return fmt.Errorf("failed to parse x509 certificate: %w", err)
+	}
+
+	daysRem := int(time.Until(x509Cert.NotAfter).Hours() / 24)
+
+	s.certMu.Lock()
+	s.activeCert = cert
+	s.certInfo = CertInfo{
+		Loaded:        true,
+		Subject:       x509Cert.Subject.CommonName,
+		Issuer:        x509Cert.Issuer.CommonName,
+		DNSNames:      x509Cert.DNSNames,
+		NotBefore:     x509Cert.NotBefore,
+		NotAfter:      x509Cert.NotAfter,
+		DaysRemaining: daysRem,
+		CertPath:      certPath,
+		KeyPath:       keyPath,
+		IsSelfSigned:  x509Cert.Issuer.CommonName == x509Cert.Subject.CommonName,
+	}
+	s.certMu.Unlock()
+
+	log.Printf("[DNS] Successfully applied TLS certificate: CN=%s, Domains=%v, Expires=%s (%d days remaining)",
+		x509Cert.Subject.CommonName, x509Cert.DNSNames, x509Cert.NotAfter.Format("2006-01-02"), daysRem)
+
+	return nil
+}
+
+// GetCertificateInfo returns the current certificate status.
+func (s *Server) GetCertificateInfo() CertInfo {
+	s.certMu.RLock()
+	defer s.certMu.RUnlock()
+	return s.certInfo
+}
+
+// UpdateDomain updates base domain and public IPs dynamically.
+func (s *Server) UpdateDomain(domain, ipv4, ipv6 string) error {
+	domain = strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(domain), "."), ".")
+	if domain == "" {
+		return errors.New("domain cannot be empty")
+	}
+
+	ipv4 = strings.TrimSpace(ipv4)
+	if ipv4 == "" {
+		return errors.New("public IPv4 is required")
+	}
+
+	s.cfg.Server.Domain = domain
+	s.cfg.Server.PublicIPv4 = ipv4
+	s.cfg.Server.PublicIPv6 = strings.TrimSpace(ipv6)
+
+	// Update resolver IPs
+	if s.resolver != nil {
+		s.resolver.UpdateServerIPs(ipv4, ipv6)
+	}
+
+	// Persist to configuration YAML
+	return config.SaveConfig(s.cfg)
 }
 
 // Start launches both DoT and DoH services.

@@ -1,7 +1,9 @@
 package panel
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -11,22 +13,26 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"
 	"gravity-dns/internal/config"
+	"gravity-dns/internal/dnsengine"
 	"gravity-dns/internal/resolver"
 	"gravity-dns/internal/store"
 )
 
 type APIHandler struct {
-	cfg      *config.Config
-	store    *store.Store
-	resolver *resolver.Resolver
+	cfg       *config.Config
+	store     *store.Store
+	resolver  *resolver.Resolver
+	dnsEngine *dnsengine.Server
 }
 
-func NewAPIHandler(cfg *config.Config, st *store.Store, res *resolver.Resolver) *APIHandler {
+func NewAPIHandler(cfg *config.Config, st *store.Store, res *resolver.Resolver, engine *dnsengine.Server) *APIHandler {
 	return &APIHandler{
-		cfg:      cfg,
-		store:    st,
-		resolver: res,
+		cfg:       cfg,
+		store:     st,
+		resolver:  res,
+		dnsEngine: engine,
 	}
 }
 
@@ -39,6 +45,76 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// ==================== AUTHENTICATION & SETUP ====================
+
+// handleCheckSetupStatus reports whether the platform has an admin initialized.
+func (h *APIHandler) handleCheckSetupStatus(w http.ResponseWriter, r *http.Request) {
+	hasAdmin, err := h.store.HasAdminUsers(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"configured": hasAdmin,
+	})
+}
+
+// handleInitialSetup sets initial admin credentials if no admin currently exists.
+func (h *APIHandler) handleInitialSetup(w http.ResponseWriter, r *http.Request) {
+	hasAdmin, err := h.store.HasAdminUsers(r.Context())
+	if err == nil && hasAdmin {
+		writeError(w, http.StatusForbidden, "platform is already initialized with an admin account")
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" || len(req.Password) < 8 {
+		writeError(w, http.StatusBadRequest, "username required and password must be at least 8 characters")
+		return
+	}
+
+	if err := h.store.EnsureAdminUser(r.Context(), req.Username, req.Password); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create admin: "+err.Error())
+		return
+	}
+
+	// Update config & save
+	h.cfg.Panel.AdminUsername = req.Username
+	h.cfg.Panel.AdminPassword = req.Password
+	_ = config.SaveConfig(h.cfg)
+
+	tokenStr, err := GenerateJWT(h.cfg.Panel.JWTSecret, req.Username, h.cfg.Panel.SessionTTL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to issue token")
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     CookieTokenName,
+		Value:    tokenStr,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   h.cfg.Panel.SessionTTL * 3600,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"username": req.Username,
+		"token":    tokenStr,
+	})
 }
 
 // handleLogin validates admin credentials and returns session token.
@@ -100,17 +176,18 @@ func (h *APIHandler) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
-// handleChangePassword allows admin to update their master password.
-func (h *APIHandler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
-	username, _ := r.Context().Value(AdminContextKey).(string)
-	if username == "" {
+// handleUpdateAdminProfile updates both admin username and password.
+func (h *APIHandler) handleUpdateAdminProfile(w http.ResponseWriter, r *http.Request) {
+	currentAdmin, _ := r.Context().Value(AdminContextKey).(string)
+	if currentAdmin == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	var req struct {
-		OldPassword string `json:"old_password"`
-		NewPassword string `json:"new_password"`
+		CurrentPassword string `json:"current_password"`
+		NewUsername     string `json:"new_username"`
+		NewPassword     string `json:"new_password"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -118,23 +195,289 @@ func (h *APIHandler) handleChangePassword(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if len(req.NewPassword) < 8 {
+	req.NewUsername = strings.TrimSpace(req.NewUsername)
+	if req.NewUsername == "" {
+		req.NewUsername = currentAdmin
+	}
+
+	if req.NewPassword != "" && len(req.NewPassword) < 8 {
 		writeError(w, http.StatusBadRequest, "new password must be at least 8 characters")
 		return
 	}
 
-	if err := h.store.AuthenticateAdmin(r.Context(), username, req.OldPassword); err != nil {
-		writeError(w, http.StatusUnauthorized, "incorrect current password")
+	if err := h.store.UpdateAdminProfile(r.Context(), currentAdmin, req.NewUsername, req.CurrentPassword, req.NewPassword); err != nil {
+		writeError(w, http.StatusBadRequest, "profile update failed: "+err.Error())
 		return
 	}
 
-	if err := h.store.UpdateAdminPassword(r.Context(), username, req.NewPassword); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update password")
-		return
+	// Update config & save
+	h.cfg.Panel.AdminUsername = req.NewUsername
+	if req.NewPassword != "" {
+		h.cfg.Panel.AdminPassword = req.NewPassword
+	}
+	_ = config.SaveConfig(h.cfg)
+
+	// Issue new token for new username
+	newToken, err := GenerateJWT(h.cfg.Panel.JWTSecret, req.NewUsername, h.cfg.Panel.SessionTTL)
+	if err == nil {
+		http.SetCookie(w, &http.Cookie{
+			Name:     CookieTokenName,
+			Value:    newToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   h.cfg.Panel.SessionTTL * 3600,
+		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "password updated successfully"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"username": req.NewUsername,
+		"token":    newToken,
+		"message":  "admin profile updated successfully",
+	})
 }
+
+// ==================== DOMAIN & SYSTEM SETTINGS ====================
+
+// handleGetSettings returns global platform settings.
+func (h *APIHandler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	currentAdmin, _ := r.Context().Value(AdminContextKey).(string)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"domain":            h.cfg.Server.Domain,
+		"public_ipv4":       h.cfg.Server.PublicIPv4,
+		"public_ipv6":       h.cfg.Server.PublicIPv6,
+		"dot_listen":        h.cfg.DNS.DoTListen,
+		"doh_listen":        h.cfg.DNS.DoHListen,
+		"sni_listen":        h.cfg.SNIProxy.Listen,
+		"device_window_sec": h.cfg.DNS.DeviceWindowSec,
+		"spoof_ttl":         h.cfg.DNS.SpoofTTL,
+		"admin_username":    currentAdmin,
+		"config_file":       h.cfg.ConfigFilePath,
+	})
+}
+
+// handleUpdateDomainSettings updates base domain and spoofing IPs.
+func (h *APIHandler) handleUpdateDomainSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Domain     string `json:"domain"`
+		PublicIPv4 string `json:"public_ipv4"`
+		PublicIPv6 string `json:"public_ipv6"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	req.Domain = strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(req.Domain), "."), ".")
+	req.PublicIPv4 = strings.TrimSpace(req.PublicIPv4)
+	if req.Domain == "" || req.PublicIPv4 == "" {
+		writeError(w, http.StatusBadRequest, "domain and public IPv4 are required")
+		return
+	}
+
+	if h.dnsEngine != nil {
+		if err := h.dnsEngine.UpdateDomain(req.Domain, req.PublicIPv4, req.PublicIPv6); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update domain: "+err.Error())
+			return
+		}
+	} else {
+		h.cfg.Server.Domain = req.Domain
+		h.cfg.Server.PublicIPv4 = req.PublicIPv4
+		h.cfg.Server.PublicIPv6 = req.PublicIPv6
+		if h.resolver != nil {
+			h.resolver.UpdateServerIPs(req.PublicIPv4, req.PublicIPv6)
+		}
+		_ = config.SaveConfig(h.cfg)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":     true,
+		"domain":      h.cfg.Server.Domain,
+		"public_ipv4": h.cfg.Server.PublicIPv4,
+		"public_ipv6": h.cfg.Server.PublicIPv6,
+		"message":     "domain and spoofing settings updated successfully",
+	})
+}
+
+// ==================== TLS CERTIFICATES ====================
+
+// handleGetCertificateInfo returns current certificate status and details.
+func (h *APIHandler) handleGetCertificateInfo(w http.ResponseWriter, r *http.Request) {
+	if h.dnsEngine != nil {
+		info := h.dnsEngine.GetCertificateInfo()
+		writeJSON(w, http.StatusOK, info)
+		return
+	}
+
+	// Fallback to config path inspection
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"loaded":    false,
+		"cert_path": h.cfg.DNS.TLSCertFile,
+		"key_path":  h.cfg.DNS.TLSKeyFile,
+	})
+}
+
+// handleUploadCertificate applies new PEM certificate and private key.
+func (h *APIHandler) handleUploadCertificate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CertPEM string `json:"cert_pem"`
+		KeyPEM  string `json:"key_pem"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	req.CertPEM = strings.TrimSpace(req.CertPEM)
+	req.KeyPEM = strings.TrimSpace(req.KeyPEM)
+
+	if req.CertPEM == "" || req.KeyPEM == "" {
+		writeError(w, http.StatusBadRequest, "both certificate (fullchain.pem) and private key (privkey.pem) are required")
+		return
+	}
+
+	// Validate keypair before applying
+	if _, err := tls.X509KeyPair([]byte(req.CertPEM), []byte(req.KeyPEM)); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid TLS certificate or private key: "+err.Error())
+		return
+	}
+
+	if h.dnsEngine != nil {
+		if err := h.dnsEngine.UpdateCertificate([]byte(req.CertPEM), []byte(req.KeyPEM)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to apply certificate: "+err.Error())
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "TLS certificate and private key updated and applied dynamically",
+	})
+}
+
+// handleReloadCertificate reloads certificate from disk.
+func (h *APIHandler) handleReloadCertificate(w http.ResponseWriter, r *http.Request) {
+	if h.dnsEngine != nil {
+		if err := h.dnsEngine.ReloadCertificatesFromDisk(); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reload certificates: "+err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// ==================== REDIS SERVER MANAGEMENT ====================
+
+// handleGetRedisInfo returns live metrics from the Redis server.
+func (h *APIHandler) handleGetRedisInfo(w http.ResponseWriter, r *http.Request) {
+	info, err := h.store.GetRedisInfo(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	info["addr"] = h.cfg.Redis.Addr
+	info["db"] = h.cfg.Redis.DB
+	info["has_password"] = h.cfg.Redis.Password != ""
+
+	writeJSON(w, http.StatusOK, info)
+}
+
+// handleTestRedisConnection verifies connection to candidate Redis parameters.
+func (h *APIHandler) handleTestRedisConnection(w http.ResponseWriter, r *http.Request) {
+	var req config.RedisConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	if req.Addr == "" {
+		req.Addr = "127.0.0.1:6379"
+	}
+
+	testClient := redis.NewClient(&redis.Options{
+		Addr:        req.Addr,
+		Password:    req.Password,
+		DB:          req.DB,
+		DialTimeout: 2 * time.Second,
+	})
+	defer testClient.Close()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	if err := testClient.Ping(ctx).Err(); err != nil {
+		writeError(w, http.StatusBadRequest, "connection failed: "+err.Error())
+		return
+	}
+	latency := float64(time.Since(start).Microseconds()) / 1000.0
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"latency_ms": latency,
+		"message":    "Redis connection verified successfully",
+	})
+}
+
+// handleUpdateRedisConfig updates Redis connection and reconnects.
+func (h *APIHandler) handleUpdateRedisConfig(w http.ResponseWriter, r *http.Request) {
+	var req config.RedisConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	if req.Addr == "" {
+		req.Addr = "127.0.0.1:6379"
+	}
+
+	if err := h.store.Reconnect(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "failed to connect: "+err.Error())
+		return
+	}
+
+	h.cfg.Redis = req
+	_ = config.SaveConfig(h.cfg)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Redis connection updated and active",
+	})
+}
+
+// handleFlushRedisSessions removes all sliding-window active device keys.
+func (h *APIHandler) handleFlushRedisSessions(w http.ResponseWriter, r *http.Request) {
+	deleted, err := h.store.FlushAllSessions(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"deleted": deleted,
+		"message": fmt.Sprintf("cleared %d active device sessions", deleted),
+	})
+}
+
+// handleFlushDNSCache clears the in-memory DNS cache.
+func (h *APIHandler) handleFlushDNSCache(w http.ResponseWriter, r *http.Request) {
+	cleared := 0
+	if h.resolver != nil {
+		cleared = h.resolver.FlushCache()
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"cleared": cleared,
+		"message": fmt.Sprintf("cleared %d cached DNS records", cleared),
+	})
+}
+
+// ==================== USER MANAGEMENT ====================
 
 // handleGetUsers returns all registered users with their active device count.
 func (h *APIHandler) handleGetUsers(w http.ResponseWriter, r *http.Request) {
@@ -283,6 +626,8 @@ func (h *APIHandler) handleGetMobileConfig(w http.ResponseWriter, r *http.Reques
 	_, _ = w.Write([]byte(profileXML))
 }
 
+// ==================== DOMAIN HIJACK RULES ====================
+
 // handleGetRules returns all domain rules.
 func (h *APIHandler) handleGetRules(w http.ResponseWriter, r *http.Request) {
 	rules, err := h.store.ListRules(r.Context())
@@ -316,7 +661,6 @@ func (h *APIHandler) handleAddRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger immediate rule reload
 	if h.resolver != nil {
 		_ = h.resolver.ReloadRules(r.Context())
 	}
@@ -408,6 +752,8 @@ func (h *APIHandler) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ==================== STATS & LOGS ====================
+
 // handleGetStats returns system-wide metrics.
 func (h *APIHandler) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.store.GetStats(r.Context(), h.cfg.DNS.DeviceWindowSec)
@@ -439,14 +785,14 @@ func (h *APIHandler) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 // handleGetServerInfo returns server IP, base domain, endpoints, and setup helpers.
 func (h *APIHandler) handleGetServerInfo(w http.ResponseWriter, r *http.Request) {
 	info := map[string]interface{}{
-		"base_domain":      h.cfg.Server.Domain,
-		"public_ipv4":      h.cfg.Server.PublicIPv4,
-		"public_ipv6":      h.cfg.Server.PublicIPv6,
-		"dot_port":         h.cfg.DNS.DoTListen,
-		"doh_port":         h.cfg.DNS.DoHListen,
-		"sniproxy_port":    h.cfg.SNIProxy.Listen,
+		"base_domain":       h.cfg.Server.Domain,
+		"public_ipv4":       h.cfg.Server.PublicIPv4,
+		"public_ipv6":       h.cfg.Server.PublicIPv6,
+		"dot_port":          h.cfg.DNS.DoTListen,
+		"doh_port":          h.cfg.DNS.DoHListen,
+		"sniproxy_port":     h.cfg.SNIProxy.Listen,
 		"device_window_sec": h.cfg.DNS.DeviceWindowSec,
-		"version":          "1.0.0-production",
+		"version":           "1.0.0-production",
 	}
 	writeJSON(w, http.StatusOK, info)
 }

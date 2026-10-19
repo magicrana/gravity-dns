@@ -629,3 +629,152 @@ func (s *Store) UpdateAdminPassword(ctx context.Context, username, newPassword s
 	adminKey := fmt.Sprintf("admin:user:%s", username)
 	return s.client.HSet(ctx, adminKey, "password_hash", string(hash)).Err()
 }
+
+// UpdateAdminProfile changes admin username, password, or both after verifying old credentials.
+func (s *Store) UpdateAdminProfile(ctx context.Context, oldUsername, newUsername, oldPassword, newPassword string) error {
+	if err := s.AuthenticateAdmin(ctx, oldUsername, oldPassword); err != nil {
+		return err
+	}
+
+	oldKey := fmt.Sprintf("admin:user:%s", oldUsername)
+	newKey := fmt.Sprintf("admin:user:%s", newUsername)
+
+	hashToSave := ""
+	if newPassword != "" {
+		h, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		hashToSave = string(h)
+	} else {
+		// Retain existing password hash
+		h, err := s.client.HGet(ctx, oldKey, "password_hash").Result()
+		if err != nil {
+			return err
+		}
+		hashToSave = h
+	}
+
+	if oldUsername != newUsername {
+		// Migrate to new username
+		pipe := s.client.Pipeline()
+		pipe.HSet(ctx, newKey, map[string]interface{}{
+			"username":      newUsername,
+			"password_hash": hashToSave,
+			"created_at":    time.Now().Unix(),
+			"last_login":    time.Now().Unix(),
+		})
+		pipe.Del(ctx, oldKey)
+		_, err := pipe.Exec(ctx)
+		return err
+	}
+
+	// Username unchanged, only update password
+	return s.client.HSet(ctx, oldKey, "password_hash", hashToSave).Err()
+}
+
+// HasAdminUsers checks if at least one admin account exists.
+func (s *Store) HasAdminUsers(ctx context.Context) (bool, error) {
+	keys, err := s.client.Keys(ctx, "admin:user:*").Result()
+	if err != nil {
+		return false, err
+	}
+	return len(keys) > 0, nil
+}
+
+// ==================== REDIS SERVER MANAGEMENT ====================
+
+// GetRedisInfo retrieves operational metrics from the active Redis server.
+func (s *Store) GetRedisInfo(ctx context.Context) (map[string]interface{}, error) {
+	start := time.Now()
+	pingErr := s.client.Ping(ctx).Err()
+	latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+
+	infoMap := map[string]interface{}{
+		"status":      "online",
+		"latency_ms":  latencyMs,
+		"ping_ok":     pingErr == nil,
+		"version":     "unknown",
+		"used_memory": "unknown",
+		"clients":     0,
+		"uptime_days": 0,
+		"total_keys":  0,
+	}
+
+	if pingErr != nil {
+		infoMap["status"] = "offline"
+		infoMap["error"] = pingErr.Error()
+		return infoMap, nil
+	}
+
+	// Parse Redis INFO
+	infoStr, err := s.client.Info(ctx).Result()
+	if err == nil {
+		lines := strings.Split(infoStr, "\r\n")
+		for _, line := range lines {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				k := strings.TrimSpace(parts[0])
+				v := strings.TrimSpace(parts[1])
+				switch k {
+				case "redis_version":
+					infoMap["version"] = v
+				case "used_memory_human":
+					infoMap["used_memory"] = v
+				case "connected_clients":
+					c, _ := strconv.Atoi(v)
+					infoMap["clients"] = c
+				case "uptime_in_days":
+					d, _ := strconv.Atoi(v)
+					infoMap["uptime_days"] = d
+				}
+			}
+		}
+	}
+
+	// DB Key Count
+	if dbSize, err := s.client.DBSize(ctx).Result(); err == nil {
+		infoMap["total_keys"] = dbSize
+	}
+
+	return infoMap, nil
+}
+
+// Reconnect swaps the underlying Redis connection to new parameters.
+func (s *Store) Reconnect(cfg *config.RedisConfig) error {
+	newClient := redis.NewClient(&redis.Options{
+		Addr:         cfg.Addr,
+		Password:     cfg.Password,
+		DB:           cfg.DB,
+		DialTimeout:  3 * time.Second,
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 2 * time.Second,
+		PoolSize:     100,
+		MinIdleConns: 10,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := newClient.Ping(ctx).Err(); err != nil {
+		_ = newClient.Close()
+		return fmt.Errorf("failed to connect to Redis at %s: %w", cfg.Addr, err)
+	}
+
+	oldClient := s.client
+	s.client = newClient
+	if oldClient != nil {
+		_ = oldClient.Close()
+	}
+
+	return nil
+}
+
+// FlushAllSessions deletes all sliding-window active device keys.
+func (s *Store) FlushAllSessions(ctx context.Context) (int64, error) {
+	keys, err := s.client.Keys(ctx, "user:*:devices").Result()
+	if err != nil || len(keys) == 0 {
+		return 0, err
+	}
+	return s.client.Del(ctx, keys...).Result()
+}

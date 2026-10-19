@@ -72,6 +72,33 @@ func New(cfg *config.Config, st *store.Store) (*Resolver, error) {
 	return r, nil
 }
 
+// UpdateServerIPs dynamically updates the spoofed IPv4 and IPv6 target addresses.
+func (r *Resolver) UpdateServerIPs(ipv4Str, ipv6Str string) {
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+
+	if ip4 := net.ParseIP(ipv4Str); ip4 != nil && ip4.To4() != nil {
+		r.clientIPv4 = ip4.To4()
+	}
+	if ipv6Str != "" {
+		if ip6 := net.ParseIP(ipv6Str); ip6 != nil {
+			r.clientIPv6 = ip6
+		}
+	} else {
+		r.clientIPv6 = nil
+	}
+}
+
+// FlushCache clears the in-memory DNS forwarding cache and returns the number of evicted items.
+func (r *Resolver) FlushCache() int {
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+
+	count := len(r.cache)
+	r.cache = make(map[string]DNSCacheEntry)
+	return count
+}
+
 // ReloadRules refreshes in-memory hijack rules from Redis.
 func (r *Resolver) ReloadRules(ctx context.Context) error {
 	domains, err := r.store.GetActiveRuleDomains(ctx)

@@ -40,3 +40,24 @@ func TestApplyEnvOverrides(t *testing.T) {
 		t.Errorf("env override failed for IPv4: %s", cfg.Server.PublicIPv4)
 	}
 }
+
+func TestSaveConfig(t *testing.T) {
+	tempFile := "test_gravity_temp.yaml"
+	defer os.Remove(tempFile)
+
+	cfg := DefaultConfig()
+	cfg.ConfigFilePath = tempFile
+	cfg.Server.Domain = "dynamic.save.test"
+
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	loaded, err := LoadConfig(tempFile)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if loaded.Server.Domain != "dynamic.save.test" {
+		t.Errorf("expected saved domain dynamic.save.test, got %s", loaded.Server.Domain)
+	}
+}

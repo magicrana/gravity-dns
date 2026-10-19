@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -12,11 +13,13 @@ import (
 
 // Config represents the master configuration for GravityDNS.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	DNS      DNSConfig      `yaml:"dns"`
-	SNIProxy SNIProxyConfig `yaml:"sniproxy"`
-	Redis    RedisConfig    `yaml:"redis"`
-	Panel    PanelConfig    `yaml:"panel"`
+	mu             sync.RWMutex   `yaml:"-"`
+	ConfigFilePath string         `yaml:"-"`
+	Server         ServerConfig   `yaml:"server"`
+	DNS            DNSConfig      `yaml:"dns"`
+	SNIProxy       SNIProxyConfig `yaml:"sniproxy"`
+	Redis          RedisConfig    `yaml:"redis"`
+	Panel          PanelConfig    `yaml:"panel"`
 }
 
 // ServerConfig holds global server identity settings.
@@ -28,14 +31,14 @@ type ServerConfig struct {
 
 // DNSConfig holds settings for DoT and DoH services.
 type DNSConfig struct {
-	Enabled        bool     `yaml:"enabled"`
-	DoTListen      string   `yaml:"dot_listen"`       // e.g. "0.0.0.0:853"
-	DoHListen      string   `yaml:"doh_listen"`       // e.g. "0.0.0.0:8443"
-	TLSCertFile    string   `yaml:"tls_cert_file"`    // Path to fullchain.pem
-	TLSKeyFile     string   `yaml:"tls_key_file"`     // Path to privkey.pem
-	UpstreamDNS    []string `yaml:"upstream_dns"`     // Upstream resolvers e.g. ["1.1.1.1:53", "8.8.8.8:53"]
-	SpoofTTL       uint32   `yaml:"spoof_ttl"`        // TTL in seconds for spoofed records (default: 60)
-	DeviceWindowSec int     `yaml:"device_window_sec"`// Sliding window duration in seconds (default: 600)
+	Enabled         bool     `yaml:"enabled"`
+	DoTListen       string   `yaml:"dot_listen"`        // e.g. "0.0.0.0:853"
+	DoHListen       string   `yaml:"doh_listen"`        // e.g. "0.0.0.0:8443"
+	TLSCertFile     string   `yaml:"tls_cert_file"`     // Path to fullchain.pem
+	TLSKeyFile      string   `yaml:"tls_key_file"`      // Path to privkey.pem
+	UpstreamDNS     []string `yaml:"upstream_dns"`      // Upstream resolvers e.g. ["1.1.1.1:53", "8.8.8.8:53"]
+	SpoofTTL        uint32   `yaml:"spoof_ttl"`         // TTL in seconds for spoofed records (default: 60)
+	DeviceWindowSec int      `yaml:"device_window_sec"` // Sliding window duration in seconds (default: 600)
 }
 
 // SNIProxyConfig holds settings for the transparent SNI router.
@@ -60,8 +63,8 @@ type PanelConfig struct {
 	Enabled       bool   `yaml:"enabled"`
 	Listen        string `yaml:"listen"`         // e.g. "0.0.0.0:8080"
 	JWTSecret     string `yaml:"jwt_secret"`     // Secret for signing JWT admin tokens
-	AdminUsername string `yaml:"admin_username"` // Initial admin username
-	AdminPassword string `yaml:"admin_password"` // Initial admin password (plain or bcrypt)
+	AdminUsername string `yaml:"admin_username"` // Master admin username
+	AdminPassword string `yaml:"admin_password"` // Master admin password (plain or bcrypt)
 	SessionTTL    int    `yaml:"session_ttl"`    // Session duration in hours (default: 24)
 }
 
@@ -138,6 +141,11 @@ func LoadConfig(path string) (*Config, error) {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("failed to parse yaml config %s: %w", foundPath, err)
 		}
+		cfg.ConfigFilePath = foundPath
+	} else if path != "" {
+		cfg.ConfigFilePath = path
+	} else {
+		cfg.ConfigFilePath = "configs/gravity.yaml"
 	}
 
 	// Environment variable overrides
@@ -147,6 +155,34 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Server.Domain = strings.TrimPrefix(strings.TrimSuffix(cfg.Server.Domain, "."), ".")
 
 	return cfg, nil
+}
+
+// SaveConfig writes the current configuration back to the configuration YAML file.
+func SaveConfig(cfg *Config) error {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+
+	targetPath := cfg.ConfigFilePath
+	if targetPath == "" {
+		targetPath = "configs/gravity.yaml"
+	}
+
+	// Ensure parent directories exist
+	parent := filepath.Dir(targetPath)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", parent, err)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to serialize config to YAML: %w", err)
+	}
+
+	if err := os.WriteFile(targetPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write config file %s: %w", targetPath, err)
+	}
+
+	return nil
 }
 
 func applyEnvOverrides(cfg *Config) {

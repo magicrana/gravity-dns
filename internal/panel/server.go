@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/cors"
 
 	"gravity-dns/internal/config"
+	"gravity-dns/internal/dnsengine"
 	"gravity-dns/internal/resolver"
 	"gravity-dns/internal/store"
 )
@@ -24,28 +25,32 @@ type Server struct {
 	cfg        *config.Config
 	store      *store.Store
 	resolver   *resolver.Resolver
+	dnsEngine  *dnsengine.Server
 	httpServer *http.Server
 	templates  *template.Template
 }
 
 // NewServer creates a new Panel server instance.
-func NewServer(cfg *config.Config, st *store.Store, res *resolver.Resolver) *Server {
+func NewServer(cfg *config.Config, st *store.Store, res *resolver.Resolver, engine *dnsengine.Server) *Server {
 	return &Server{
-		cfg:      cfg,
-		store:    st,
-		resolver: res,
+		cfg:       cfg,
+		store:     st,
+		resolver:  res,
+		dnsEngine: engine,
 	}
 }
 
 // Start initializes routing, loads templates, and starts HTTP listener.
 func (s *Server) Start() error {
-	// Ensure default admin user is initialized in Redis
+	// Ensure default admin user is initialized in Redis if specified in config
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := s.store.EnsureAdminUser(ctx, s.cfg.Panel.AdminUsername, s.cfg.Panel.AdminPassword); err != nil {
-		log.Printf("[PANEL] Warning: Failed to ensure default admin user: %v", err)
-	} else {
-		log.Printf("[PANEL] Default admin initialized: '%s'", s.cfg.Panel.AdminUsername)
+	if s.cfg.Panel.AdminUsername != "" && s.cfg.Panel.AdminPassword != "" {
+		if err := s.store.EnsureAdminUser(ctx, s.cfg.Panel.AdminUsername, s.cfg.Panel.AdminPassword); err != nil {
+			log.Printf("[PANEL] Warning: Failed to ensure default admin user: %v", err)
+		} else {
+			log.Printf("[PANEL] Default admin initialized: '%s'", s.cfg.Panel.AdminUsername)
+		}
 	}
 
 	r := chi.NewRouter()
@@ -67,7 +72,7 @@ func (s *Server) Start() error {
 		MaxAge:           300,
 	}))
 
-	api := NewAPIHandler(s.cfg, s.store, s.resolver)
+	api := NewAPIHandler(s.cfg, s.store, s.resolver, s.dnsEngine)
 
 	// Static files handler
 	staticDir := config.AbsolutePath("web/static")
@@ -76,21 +81,23 @@ func (s *Server) Start() error {
 		r.Handle("/static/*", http.StripPrefix("/static", fileServer))
 	}
 
-	// Public Web & Auth Routes
+	// Public Web & Setup Routes
 	r.Get("/login", s.renderLoginPage)
 	r.Post("/api/login", api.handleLogin)
+	r.Get("/api/setup/status", api.handleCheckSetupStatus)
+	r.Post("/api/setup/initialize", api.handleInitialSetup)
 	r.Get("/api/user/{token}/mobileconfig", api.handleGetMobileConfig)
 
-	// Protected Routes
+	// Protected Routes (Session / JWT Token required)
 	r.Group(func(protected chi.Router) {
 		protected.Use(AuthMiddleware(s.cfg.Panel.JWTSecret))
 
-		// Web Dashboard
+		// Web Dashboard SPA
 		protected.Get("/", s.renderDashboard)
 
-		// Auth & Security
+		// Auth & Admin Profile
 		protected.Post("/api/logout", api.handleLogout)
-		protected.Post("/api/admin/change-password", api.handleChangePassword)
+		protected.Post("/api/admin/profile", api.handleUpdateAdminProfile)
 
 		// User Management
 		protected.Get("/api/users", api.handleGetUsers)
@@ -100,7 +107,7 @@ func (s *Server) Start() error {
 		protected.Post("/api/users/{token}/kill-sessions", api.handleKillSessions)
 		protected.Get("/api/users/{token}/devices", api.handleGetUserDevices)
 
-		// Rules & Presets
+		// Domain Hijack Rules & Streaming Presets
 		protected.Get("/api/rules", api.handleGetRules)
 		protected.Post("/api/rules", api.handleAddRule)
 		protected.Delete("/api/rules/{domain}", api.handleDeleteRule)
@@ -108,7 +115,23 @@ func (s *Server) Start() error {
 		protected.Get("/api/presets", api.handleGetPresets)
 		protected.Post("/api/presets/{id}/apply", api.handleApplyPreset)
 
-		// Metrics, Logs & Info
+		// Domain & Network Settings
+		protected.Get("/api/settings", api.handleGetSettings)
+		protected.Put("/api/settings/domain", api.handleUpdateDomainSettings)
+
+		// TLS Certificate Management
+		protected.Get("/api/settings/certificate", api.handleGetCertificateInfo)
+		protected.Post("/api/settings/certificate", api.handleUploadCertificate)
+		protected.Post("/api/settings/certificate/reload", api.handleReloadCertificate)
+
+		// Redis Server Management
+		protected.Get("/api/redis/info", api.handleGetRedisInfo)
+		protected.Post("/api/redis/test", api.handleTestRedisConnection)
+		protected.Post("/api/redis/config", api.handleUpdateRedisConfig)
+		protected.Post("/api/redis/flush-sessions", api.handleFlushRedisSessions)
+		protected.Post("/api/redis/flush-cache", api.handleFlushDNSCache)
+
+		// Metrics, Logs & Server Info
 		protected.Get("/api/stats", api.handleGetStats)
 		protected.Get("/api/logs", api.handleGetLogs)
 		protected.Get("/api/server-info", api.handleGetServerInfo)
@@ -138,7 +161,7 @@ func (s *Server) Close() error {
 	return nil
 }
 
-// renderLoginPage renders the clean login page.
+// renderLoginPage renders the clean login page with initial setup detection.
 func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request) {
 	// If already authenticated, redirect to /
 	if cookie, err := r.Cookie(CookieTokenName); err == nil && cookie.Value != "" {
@@ -155,9 +178,12 @@ func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hasAdmin, _ := s.store.HasAdminUsers(r.Context())
+
 	_ = t.Execute(w, map[string]interface{}{
-		"Title":  "Login - GravityDNS",
-		"Domain": s.cfg.Server.Domain,
+		"Title":      "Login - GravityDNS",
+		"Domain":     s.cfg.Server.Domain,
+		"IsNewSetup": !hasAdmin,
 	})
 }
 
@@ -176,8 +202,11 @@ func (s *Server) renderDashboard(w http.ResponseWriter, r *http.Request) {
 		"Username":   username,
 		"BaseDomain": s.cfg.Server.Domain,
 		"PublicIPv4": s.cfg.Server.PublicIPv4,
+		"PublicIPv6": s.cfg.Server.PublicIPv6,
 		"DoTListen":  s.cfg.DNS.DoTListen,
 		"DoHListen":  s.cfg.DNS.DoHListen,
 		"SNIListen":  s.cfg.SNIProxy.Listen,
+		"RedisAddr":  s.cfg.Redis.Addr,
+		"RedisDB":    s.cfg.Redis.DB,
 	})
 }

@@ -46,7 +46,6 @@
             backdrop-filter: blur(12px);
             border: 1px solid #1e263d;
         }
-        /* Custom scrollbar */
         ::-webkit-scrollbar {
             width: 6px;
             height: 6px;
@@ -81,14 +80,14 @@
                     <div class="text-[11px] text-slate-400 flex items-center gap-2">
                         <span>Base: <b class="code-font text-slate-300" id="header-domain">{{.BaseDomain}}</b></span>
                         <span>&bull;</span>
-                        <span>VPS IPv4: <b class="code-font text-slate-300" id="header-ipv4">{{.PublicIPv4}}</b></span>
+                        <span>IPv4: <b class="code-font text-slate-300" id="header-ipv4">{{.PublicIPv4}}</b></span>
                     </div>
                 </div>
             </div>
 
             <!-- Health Status & Actions -->
             <div class="flex items-center gap-3">
-                <div class="hidden md:flex items-center gap-2 text-xs">
+                <div class="hidden lg:flex items-center gap-2 text-xs">
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                         DoT :853
@@ -101,16 +100,20 @@
                         <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
                         DoH :8443
                     </span>
+                    <span id="header-redis-pill" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-medium cursor-pointer" onclick="switchTab('redis')">
+                        <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                        Redis: OK
+                    </span>
                 </div>
 
                 <div class="h-6 w-px bg-darkborder hidden md:block"></div>
 
                 <div class="flex items-center gap-2">
-                    <span class="text-xs text-slate-400 hidden sm:inline">Admin: <strong class="text-white">{{.Username}}</strong></span>
-                    <button onclick="openChangePasswordModal()" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-darkcard transition" title="Change Admin Password">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                    <button onclick="openProfileModal()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-darkcard hover:bg-darkhover text-xs font-semibold text-slate-300 transition border border-darkborder" title="Manage Admin Profile">
+                        <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
                         </svg>
+                        <span id="header-username">{{.Username}}</span>
                     </button>
                     <button onclick="handleLogout()" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 transition flex items-center gap-1.5">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -196,8 +199,8 @@
         </div>
 
         <!-- Navigation Tabs -->
-        <div class="border-b border-darkborder flex items-center justify-between">
-            <nav class="flex space-x-6">
+        <div class="border-b border-darkborder flex items-center justify-between overflow-x-auto">
+            <nav class="flex space-x-6 min-w-max">
                 <button onclick="switchTab('users')" id="tab-btn-users" class="tab-btn active pb-4 text-sm font-semibold border-b-2 border-indigo-500 text-indigo-400 flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
@@ -221,6 +224,18 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                     </svg>
                     Live Query Stream
+                </button>
+                <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn pb-4 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+                    </svg>
+                    Domain & TLS Certs
+                </button>
+                <button onclick="switchTab('redis')" id="tab-btn-redis" class="tab-btn pb-4 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/>
+                    </svg>
+                    Redis Manager
                 </button>
                 <button onclick="switchTab('setup')" id="tab-btn-setup" class="tab-btn pb-4 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -315,7 +330,6 @@
 
         <!-- TAB 3: DOMAIN RULES & PRESETS -->
         <section id="tab-rules" class="hidden space-y-6">
-            <!-- Streaming Presets Showcase -->
             <div>
                 <div class="flex items-center justify-between mb-3">
                     <div>
@@ -328,7 +342,6 @@
                 </div>
             </div>
 
-            <!-- Custom Domain Rules Table -->
             <div class="space-y-4">
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div>
@@ -403,7 +416,186 @@
             </div>
         </section>
 
-        <!-- TAB 5: CLIENT SETUP & GUIDES -->
+        <!-- TAB 5: DOMAIN & TLS CERTS (NEW) -->
+        <section id="tab-settings" class="hidden space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Base Domain & Network Configuration -->
+                <div class="glass-panel rounded-2xl p-6 border border-darkborder space-y-5">
+                    <div>
+                        <h3 class="text-lg font-bold text-white">Domain & Network Setup</h3>
+                        <p class="text-xs text-slate-400">Configure base wildcard domain and spoofing target IPs.</p>
+                    </div>
+
+                    <form id="form-domain-settings" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Base Domain (Wildcard: *.<span id="preview-domain">domain</span>)</label>
+                            <input type="text" id="setting-domain" required placeholder="dns.mydomain.com"
+                                class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                            <p class="text-[11px] text-slate-500 mt-1">Users will connect via &lt;token&gt;.<span class="text-indigo-400">domain</span></p>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">VPS Public IPv4 (Spoof Target)</label>
+                            <input type="text" id="setting-ipv4" required placeholder="203.0.113.1"
+                                class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                            <p class="text-[11px] text-slate-500 mt-1">The public IPv4 address where SNI Proxy (:443) is listening.</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">VPS Public IPv6 (Optional)</label>
+                            <input type="text" id="setting-ipv6" placeholder="2001:db8::1 (leave blank to force IPv4)"
+                                class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+
+                        <div class="pt-2">
+                            <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition">
+                                Save Domain Settings
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Certificate Status Card -->
+                <div class="glass-panel rounded-2xl p-6 border border-darkborder space-y-5 flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-lg font-bold text-white">TLS Wildcard Certificate</h3>
+                            <button onclick="fetchCertInfo()" class="text-xs text-indigo-400 hover:text-indigo-300">Refresh</button>
+                        </div>
+                        <p class="text-xs text-slate-400">Used for encrypted DNS-over-TLS (:853) and DNS-over-HTTPS (:8443).</p>
+                    </div>
+
+                    <div id="cert-details-box" class="p-4 rounded-xl bg-darkbg border border-darkborder space-y-3 text-xs">
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">Certificate Status:</span>
+                            <span id="cert-status-badge" class="px-2 py-0.5 rounded-full font-semibold">Loading...</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">Common Name (CN):</span>
+                            <span id="cert-cn" class="font-semibold text-white code-font">-</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">Issuer:</span>
+                            <span id="cert-issuer" class="text-slate-300">-</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">Domains (SANs):</span>
+                            <span id="cert-domains" class="text-indigo-400 code-font">-</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-slate-400">Expires At:</span>
+                            <span id="cert-expires" class="text-slate-300">-</span>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2 pt-2">
+                        <button onclick="openUploadCertModal()" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold text-center transition">
+                            Upload / Paste New Certificate
+                        </button>
+                        <button onclick="reloadCertFromDisk()" class="px-4 py-2.5 rounded-xl bg-darkcard border border-darkborder hover:bg-darkhover text-slate-300 text-xs font-semibold transition">
+                            Reload Disk Cert
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 6: REDIS SERVER MANAGER (NEW) -->
+        <section id="tab-redis" class="hidden space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Redis Status & Metrics -->
+                <div class="glass-panel rounded-2xl p-6 border border-darkborder space-y-5">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Redis Server Operational Status</h3>
+                            <p class="text-xs text-slate-400">Sliding window device tracker and rules state store.</p>
+                        </div>
+                        <span id="redis-status-badge" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            Online
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                        <div class="p-3 rounded-xl bg-darkbg border border-darkborder">
+                            <span class="text-slate-400 block mb-1">Ping Latency</span>
+                            <span id="redis-latency" class="text-base font-bold text-emerald-400 code-font">0.0 ms</span>
+                        </div>
+                        <div class="p-3 rounded-xl bg-darkbg border border-darkborder">
+                            <span class="text-slate-400 block mb-1">Redis Version</span>
+                            <span id="redis-version" class="text-base font-bold text-white code-font">-</span>
+                        </div>
+                        <div class="p-3 rounded-xl bg-darkbg border border-darkborder">
+                            <span class="text-slate-400 block mb-1">Memory Usage</span>
+                            <span id="redis-memory" class="text-base font-bold text-white code-font">-</span>
+                        </div>
+                        <div class="p-3 rounded-xl bg-darkbg border border-darkborder">
+                            <span class="text-slate-400 block mb-1">Total Keys in DB</span>
+                            <span id="redis-keys" class="text-base font-bold text-indigo-400 code-font">0</span>
+                        </div>
+                        <div class="p-3 rounded-xl bg-darkbg border border-darkborder">
+                            <span class="text-slate-400 block mb-1">Connected Clients</span>
+                            <span id="redis-clients" class="text-base font-bold text-white code-font">0</span>
+                        </div>
+                        <div class="p-3 rounded-xl bg-darkbg border border-darkborder">
+                            <span class="text-slate-400 block mb-1">Server Uptime</span>
+                            <span id="redis-uptime" class="text-base font-bold text-white code-font">0 days</span>
+                        </div>
+                    </div>
+
+                    <!-- Maintenance Actions -->
+                    <div class="pt-2 border-t border-darkborder space-y-2">
+                        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Maintenance Operations</span>
+                        <div class="flex gap-2">
+                            <button onclick="flushRedisSessions()" class="flex-1 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-400 text-xs font-semibold transition">
+                                Flush All Active Sessions
+                            </button>
+                            <button onclick="flushDNSCache()" class="flex-1 py-2 rounded-xl bg-darkcard border border-darkborder hover:bg-darkhover text-slate-300 text-xs font-semibold transition">
+                                Flush In-Memory DNS Cache
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Redis Configuration Form -->
+                <div class="glass-panel rounded-2xl p-6 border border-darkborder space-y-5">
+                    <div>
+                        <h3 class="text-lg font-bold text-white">Redis Connection Settings</h3>
+                        <p class="text-xs text-slate-400">Update Redis connection host, authentication password, and database index.</p>
+                    </div>
+
+                    <form id="form-redis-config" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Redis Host & Port</label>
+                            <input type="text" id="redis-addr" required placeholder="127.0.0.1:6379"
+                                class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Redis Password (Leave blank if none)</label>
+                            <input type="password" id="redis-password" placeholder="••••••••••••"
+                                class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Database Index</label>
+                            <input type="number" id="redis-db" min="0" max="15" value="0" required
+                                class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+
+                        <div class="flex gap-2 pt-2">
+                            <button type="button" onclick="testRedisConnection()" class="flex-1 py-2.5 rounded-xl bg-darkcard border border-darkborder hover:bg-darkhover text-slate-300 text-xs font-semibold transition">
+                                Test Connection
+                            </button>
+                            <button type="submit" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition">
+                                Save & Reconnect
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 7: CLIENT SETUP & GUIDES -->
         <section id="tab-setup" class="hidden space-y-6">
             <div>
                 <h2 class="text-xl font-bold text-white">Device Configuration Guides</h2>
@@ -426,7 +618,7 @@
                         <li>Open device <strong>Settings</strong> &rarr; <strong>Network & Internet</strong> (or Connections).</li>
                         <li>Tap <strong>Private DNS</strong>.</li>
                         <li>Select <strong>Private DNS provider hostname</strong>.</li>
-                        <li>Enter user endpoint: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">&lt;token&gt;.{{.BaseDomain}}</code></li>
+                        <li>Enter user endpoint: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">&lt;token&gt;.<span class="guide-domain">{{.BaseDomain}}</span></code></li>
                         <li>Tap <strong>Save</strong>. All apps now bypass geo-blocks automatically!</li>
                     </ol>
                 </div>
@@ -465,9 +657,9 @@
                     <ol class="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
                         <li>Open <strong>Settings</strong> &rarr; <strong>Network & Internet</strong> &rarr; <strong>Wi-Fi</strong> (or Ethernet).</li>
                         <li>Click <strong>Hardware properties</strong> &rarr; edit <strong>DNS server assignment</strong> to Manual.</li>
-                        <li>Set Preferred DNS IPv4 to: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">{{.PublicIPv4}}</code></li>
+                        <li>Set Preferred DNS IPv4 to: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded guide-ipv4">{{.PublicIPv4}}</code></li>
                         <li>Select <strong>Encrypted only (DNS over HTTPS)</strong>.</li>
-                        <li>Enter DoH Template: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">https://{{.BaseDomain}}:8443/dns-query/&lt;token&gt;</code></li>
+                        <li>Enter DoH Template: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">https://<span class="guide-domain">{{.BaseDomain}}</span>:8443/dns-query/&lt;token&gt;</code></li>
                     </ol>
                 </div>
 
@@ -483,8 +675,8 @@
                         </div>
                     </div>
                     <ol class="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
-                        <li>On your home router or Apple TV, install or configure a DoT upstream client (e.g. Stubby, dnscrypt-proxy, or router native DoT).</li>
-                        <li>Set upstream server to: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">{{.PublicIPv4}}:853</code> with TLS hostname: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">&lt;token&gt;.{{.BaseDomain}}</code></li>
+                        <li>On your home router or Apple TV, configure a DoT upstream client.</li>
+                        <li>Set upstream server to: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded guide-ipv4">{{.PublicIPv4}}</code>:853 with TLS hostname: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">&lt;token&gt;.<span class="guide-domain">{{.BaseDomain}}</span></code></li>
                         <li>Now every device connected to your home Wi-Fi stream seamlessly!</li>
                     </ol>
                 </div>
@@ -557,7 +749,6 @@
             </div>
 
             <div class="space-y-4">
-                <!-- Android Private DNS -->
                 <div class="p-3.5 rounded-xl bg-darkbg border border-darkborder space-y-1.5">
                     <div class="flex items-center justify-between">
                         <span class="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
@@ -568,7 +759,6 @@
                     <div id="setup-android-endpoint" class="code-font text-xs text-white bg-darkpanel p-2 rounded-lg break-all select-all"></div>
                 </div>
 
-                <!-- DoH Endpoint -->
                 <div class="p-3.5 rounded-xl bg-darkbg border border-darkborder space-y-1.5">
                     <div class="flex items-center justify-between">
                         <span class="text-xs font-semibold text-cyan-400 flex items-center gap-1.5">
@@ -579,7 +769,6 @@
                     <div id="setup-doh-endpoint" class="code-font text-xs text-white bg-darkpanel p-2 rounded-lg break-all select-all"></div>
                 </div>
 
-                <!-- iOS Profile Download -->
                 <div class="p-3.5 rounded-xl bg-darkbg border border-darkborder space-y-2">
                     <span class="text-xs font-semibold text-indigo-400 flex items-center gap-1.5">
                         🍏 Apple iOS / iPadOS / macOS Profile
@@ -632,28 +821,71 @@
         </div>
     </div>
 
-    <!-- MODAL: Change Admin Password -->
-    <div id="modal-change-password" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+    <!-- MODAL: Upload / Paste Certificate -->
+    <div id="modal-upload-cert" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl">
             <div class="flex items-center justify-between">
-                <h3 class="text-lg font-bold text-white">Update Admin Password</h3>
-                <button onclick="closeModal('modal-change-password')" class="text-slate-400 hover:text-white">&times;</button>
+                <div>
+                    <h3 class="text-lg font-bold text-white">Install TLS Certificate</h3>
+                    <p class="text-xs text-slate-400">Paste PEM-encoded fullchain and private key for wildcard domain.</p>
+                </div>
+                <button onclick="closeModal('modal-upload-cert')" class="text-slate-400 hover:text-white text-xl">&times;</button>
             </div>
 
-            <form id="form-change-password" class="space-y-4">
+            <form id="form-upload-cert" class="space-y-4">
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Current Password</label>
-                    <input type="password" id="pw-old" required
-                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Certificate (fullchain.pem)</label>
+                    <textarea id="cert-pem-input" rows="5" required placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-xs code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none"></textarea>
                 </div>
+
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">New Password (min 8 chars)</label>
-                    <input type="password" id="pw-new" minlength="8" required
-                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Private Key (privkey.pem)</label>
+                    <textarea id="key-pem-input" rows="5" required placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-xs code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none"></textarea>
                 </div>
+
                 <div class="flex justify-end gap-2 pt-2">
-                    <button type="button" onclick="closeModal('modal-change-password')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Cancel</button>
-                    <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Update Password</button>
+                    <button type="button" onclick="closeModal('modal-upload-cert')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Cancel</button>
+                    <button type="submit" class="px-5 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Verify & Apply Dynamic TLS</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: Manage Admin Profile (Change Username & Password) -->
+    <div id="modal-manage-profile" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-bold text-white">Admin Account Security</h3>
+                    <p class="text-xs text-slate-400">Change your master username and login password.</p>
+                </div>
+                <button onclick="closeModal('modal-manage-profile')" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+
+            <form id="form-manage-profile" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Admin Username</label>
+                    <input type="text" id="profile-new-username" required
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Current Password (Required)</label>
+                    <input type="password" id="profile-current-password" required
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">New Password (Leave blank to keep current)</label>
+                    <input type="password" id="profile-new-password" minlength="8" placeholder="••••••••••••"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('modal-manage-profile')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Update Profile</button>
                 </div>
             </form>
         </div>
@@ -669,6 +901,7 @@
         let currentTab = 'users';
         let serverBaseDomain = '{{.BaseDomain}}';
         let serverIPv4 = '{{.PublicIPv4}}';
+        let currentAdminUsername = '{{.Username}}';
 
         function showToast(msg, isError = false) {
             const toast = document.getElementById('toast');
@@ -691,7 +924,8 @@
         function switchTab(tab) {
             currentTab = tab;
             document.querySelectorAll('section[id^="tab-"]').forEach(el => el.classList.add('hidden'));
-            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+            const target = document.getElementById(`tab-${tab}`);
+            if (target) target.classList.remove('hidden');
 
             document.querySelectorAll('.tab-btn').forEach(btn => {
                 btn.classList.remove('border-indigo-500', 'text-indigo-400');
@@ -712,6 +946,8 @@
             if (currentTab === 'devices') fetchAllDevices();
             if (currentTab === 'rules') { fetchRules(); fetchPresets(); }
             if (currentTab === 'logs') fetchLogs();
+            if (currentTab === 'settings') { fetchSettings(); fetchCertInfo(); }
+            if (currentTab === 'redis') fetchRedisInfo();
         }
 
         async function fetchStats() {
@@ -968,6 +1204,270 @@
             }
         }
 
+        // ==================== DOMAIN & TLS SETTINGS ====================
+        async function fetchSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                if (!res.ok) return;
+                const d = await res.json();
+                document.getElementById('setting-domain').value = d.domain;
+                document.getElementById('preview-domain').textContent = d.domain;
+                document.getElementById('setting-ipv4').value = d.public_ipv4;
+                document.getElementById('setting-ipv6').value = d.public_ipv6 || '';
+
+                serverBaseDomain = d.domain;
+                serverIPv4 = d.public_ipv4;
+                document.getElementById('header-domain').textContent = d.domain;
+                document.getElementById('header-ipv4').textContent = d.public_ipv4;
+
+                document.querySelectorAll('.guide-domain').forEach(el => el.textContent = d.domain);
+                document.querySelectorAll('.guide-ipv4').forEach(el => el.textContent = d.public_ipv4);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        document.getElementById('form-domain-settings').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const domain = document.getElementById('setting-domain').value.trim();
+            const public_ipv4 = document.getElementById('setting-ipv4').value.trim();
+            const public_ipv6 = document.getElementById('setting-ipv6').value.trim();
+
+            try {
+                const res = await fetch('/api/settings/domain', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domain, public_ipv4, public_ipv6 })
+                });
+                const d = await res.json();
+                if (res.ok) {
+                    showToast('Domain and network settings updated successfully!');
+                    fetchSettings();
+                } else {
+                    showToast(d.error || 'Failed to update settings', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        });
+
+        async function fetchCertInfo() {
+            try {
+                const res = await fetch('/api/settings/certificate');
+                if (!res.ok) return;
+                const c = await res.json();
+
+                const badge = document.getElementById('cert-status-badge');
+                if (c.loaded) {
+                    if (c.days_remaining <= 10) {
+                        badge.className = 'px-2.5 py-0.5 rounded-full font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20';
+                        badge.textContent = `Expiring soon (${c.days_remaining}d)`;
+                    } else {
+                        badge.className = 'px-2.5 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+                        badge.textContent = `Active (${c.days_remaining} days left)`;
+                    }
+                } else {
+                    badge.className = 'px-2.5 py-0.5 rounded-full font-semibold bg-red-500/10 text-red-400 border border-red-500/20';
+                    badge.textContent = 'No Certificate Loaded';
+                }
+
+                document.getElementById('cert-cn').textContent = c.subject || 'None';
+                document.getElementById('cert-issuer').textContent = c.issuer || 'None';
+                document.getElementById('cert-domains').textContent = (c.dns_names && c.dns_names.length) ? c.dns_names.join(', ') : 'None';
+                document.getElementById('cert-expires').textContent = c.not_after ? new Date(c.not_after).toLocaleString() : 'N/A';
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function reloadCertFromDisk() {
+            try {
+                const res = await fetch('/api/settings/certificate/reload', { method: 'POST' });
+                const d = await res.json();
+                if (res.ok) {
+                    showToast('Certificates reloaded from disk!');
+                    fetchCertInfo();
+                } else {
+                    showToast(d.error || 'Failed to reload', true);
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        document.getElementById('form-upload-cert').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const cert_pem = document.getElementById('cert-pem-input').value.trim();
+            const key_pem = document.getElementById('key-pem-input').value.trim();
+
+            try {
+                const res = await fetch('/api/settings/certificate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cert_pem, key_pem })
+                });
+                const d = await res.json();
+                if (res.ok) {
+                    closeModal('modal-upload-cert');
+                    document.getElementById('form-upload-cert').reset();
+                    showToast('TLS Certificate and Private Key applied successfully!');
+                    fetchCertInfo();
+                } else {
+                    showToast(d.error || 'Failed to install certificate', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        });
+
+        // ==================== REDIS MANAGEMENT ====================
+        async function fetchRedisInfo() {
+            try {
+                const res = await fetch('/api/redis/info');
+                if (!res.ok) return;
+                const d = await res.json();
+
+                const badge = document.getElementById('redis-status-badge');
+                const headerPill = document.getElementById('header-redis-pill');
+
+                if (d.status === 'online') {
+                    badge.className = 'px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+                    badge.textContent = `Online (${d.latency_ms.toFixed(2)} ms)`;
+                    if (headerPill) {
+                        headerPill.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium cursor-pointer';
+                        headerPill.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Redis: OK';
+                    }
+                } else {
+                    badge.className = 'px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20';
+                    badge.textContent = 'Disconnected';
+                    if (headerPill) {
+                        headerPill.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 font-medium cursor-pointer';
+                        headerPill.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Redis: Error';
+                    }
+                }
+
+                document.getElementById('redis-latency').textContent = `${d.latency_ms ? d.latency_ms.toFixed(2) : '0'} ms`;
+                document.getElementById('redis-version').textContent = d.version || 'Unknown';
+                document.getElementById('redis-memory').textContent = d.used_memory || 'Unknown';
+                document.getElementById('redis-keys').textContent = d.total_keys !== undefined ? d.total_keys : '0';
+                document.getElementById('redis-clients').textContent = d.clients !== undefined ? d.clients : '0';
+                document.getElementById('redis-uptime').textContent = `${d.uptime_days || 0} days`;
+
+                document.getElementById('redis-addr').value = d.addr || '127.0.0.1:6379';
+                document.getElementById('redis-db').value = d.db !== undefined ? d.db : 0;
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function testRedisConnection() {
+            const addr = document.getElementById('redis-addr').value.trim();
+            const password = document.getElementById('redis-password').value;
+            const db = parseInt(document.getElementById('redis-db').value, 10);
+
+            try {
+                const res = await fetch('/api/redis/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ addr, password, db })
+                });
+                const d = await res.json();
+                if (res.ok) {
+                    showToast(`Connection verified! Ping latency: ${d.latency_ms.toFixed(2)} ms`);
+                } else {
+                    showToast(d.error || 'Connection failed', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        }
+
+        document.getElementById('form-redis-config').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const addr = document.getElementById('redis-addr').value.trim();
+            const password = document.getElementById('redis-password').value;
+            const db = parseInt(document.getElementById('redis-db').value, 10);
+
+            try {
+                const res = await fetch('/api/redis/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ addr, password, db })
+                });
+                const d = await res.json();
+                if (res.ok) {
+                    showToast('Connected to new Redis configuration!');
+                    fetchRedisInfo();
+                } else {
+                    showToast(d.error || 'Failed to update Redis', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        });
+
+        async function flushRedisSessions() {
+            if (!confirm('Are you sure you want to flush all active client device sessions from Redis?')) return;
+            try {
+                const res = await fetch('/api/redis/flush-sessions', { method: 'POST' });
+                const d = await res.json();
+                if (res.ok) {
+                    showToast(d.message);
+                    fetchRedisInfo();
+                    fetchStats();
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        async function flushDNSCache() {
+            try {
+                const res = await fetch('/api/redis/flush-cache', { method: 'POST' });
+                const d = await res.json();
+                if (res.ok) {
+                    showToast(d.message);
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        // ==================== ADMIN PROFILE UPDATE ====================
+        function openProfileModal() {
+            document.getElementById('profile-new-username').value = currentAdminUsername;
+            document.getElementById('profile-current-password').value = '';
+            document.getElementById('profile-new-password').value = '';
+            document.getElementById('modal-manage-profile').classList.remove('hidden');
+        }
+
+        document.getElementById('form-manage-profile').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const new_username = document.getElementById('profile-new-username').value.trim();
+            const current_password = document.getElementById('profile-current-password').value;
+            const new_password = document.getElementById('profile-new-password').value;
+
+            try {
+                const res = await fetch('/api/admin/profile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ current_password, new_username, new_password })
+                });
+                const d = await res.json();
+                if (res.ok) {
+                    closeModal('modal-manage-profile');
+                    showToast('Admin profile updated successfully!');
+                    currentAdminUsername = d.username;
+                    document.getElementById('header-username').textContent = d.username;
+                } else {
+                    showToast(d.error || 'Failed to update profile', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        });
+
+        // Quick setup & session killing
         function openQuickSetup(token, username) {
             document.getElementById('setup-modal-user').textContent = username;
             document.getElementById('setup-android-endpoint').textContent = `${token}.${serverBaseDomain}`;
@@ -980,7 +1480,7 @@
         }
 
         async function killSessions(token) {
-            if (!confirm('Are you sure you want to disconnect all active device sessions for this user?')) return;
+            if (!confirm('Disconnect all active device sessions for this user?')) return;
             try {
                 const res = await fetch(`/api/users/${token}/kill-sessions`, { method: 'POST' });
                 if (res.ok) {
@@ -1039,8 +1539,8 @@
         function openAddRuleModal() {
             document.getElementById('modal-add-rule').classList.remove('hidden');
         }
-        function openChangePasswordModal() {
-            document.getElementById('modal-change-password').classList.remove('hidden');
+        function openUploadCertModal() {
+            document.getElementById('modal-upload-cert').classList.remove('hidden');
         }
         function closeModal(id) {
             document.getElementById(id).classList.add('hidden');
@@ -1076,7 +1576,6 @@
                     showToast(`User created: ${data.username}`);
                     fetchUsers();
                     fetchStats();
-                    // Open Quick Setup for immediate access
                     openQuickSetup(data.token, data.username);
                 } else {
                     showToast(data.error || 'Failed to create user', true);
@@ -1114,32 +1613,6 @@
             }
         });
 
-        // Form: Change Password
-        document.getElementById('form-change-password').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const old_password = document.getElementById('pw-old').value;
-            const new_password = document.getElementById('pw-new').value;
-
-            try {
-                const res = await fetch('/api/admin/change-password', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ old_password, new_password })
-                });
-
-                const data = await res.json();
-                if (res.ok) {
-                    closeModal('modal-change-password');
-                    document.getElementById('form-change-password').reset();
-                    showToast('Admin password changed successfully!');
-                } else {
-                    showToast(data.error || 'Failed to update password', true);
-                }
-            } catch (err) {
-                showToast(err.message, true);
-            }
-        });
-
         async function handleLogout() {
             await fetch('/api/logout', { method: 'POST' });
             window.location.href = '/login';
@@ -1161,6 +1634,9 @@
             }
             if (currentTab === 'logs') {
                 fetchLogs();
+            }
+            if (currentTab === 'redis') {
+                fetchRedisInfo();
             }
         }, 3000);
     </script>

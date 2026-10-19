@@ -35,7 +35,7 @@ func main() {
 		log.Fatalf("[PANEL] Resolver initialization error: %v", err)
 	}
 
-	server := panel.NewServer(cfg, st, res)
+	server := panel.NewServer(cfg, st, res, nil)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
