@@ -182,6 +182,11 @@ else
     prompt_input "Set Web Management Panel Admin Password: [${PW_DEFAULT}] " INPUT_PW "$PW_DEFAULT"
     ADMIN_PASS="${INPUT_PW:-$PW_DEFAULT}"
 
+    # 4. Optional Cloudflare API Token for Automated Let's Encrypt Wildcard SSL
+    CF_TOKEN_DEFAULT="${GRAVITY_CF_TOKEN:-}"
+    prompt_input "Enter Cloudflare API Token for Automated Let's Encrypt Wildcard SSL (Optional - press Enter to skip or configure in Web UI): [${CF_TOKEN_DEFAULT}] " INPUT_CF "$CF_TOKEN_DEFAULT"
+    CF_TOKEN="${INPUT_CF:-$CF_TOKEN_DEFAULT}"
+
     JWT_SECRET=$(openssl rand -hex 24 2>/dev/null || echo "gravity_secret_jwt_random_key_123456789")
     REDIS_PASS=""
     REDIS_ADDR="127.0.0.1:6379"
@@ -214,7 +219,7 @@ echo -e "\n${BOLD}=== Step 2: System Packages & Dependencies ===${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \
-    curl git build-essential ufw redis-server certbot ca-certificates openssl
+    curl git build-essential ufw redis-server certbot python3-certbot-dns-cloudflare ca-certificates openssl
 
 # Ensure Redis is running and starts on boot
 systemctl enable redis-server
@@ -305,6 +310,33 @@ fi
 # Copy web templates and static assets
 rm -rf /var/lib/gravity/web
 cp -r "${SOURCE_DIR}/web" /var/lib/gravity/
+
+# Automated Let's Encrypt Wildcard SSL provisioning if Cloudflare API Token provided
+if [ -n "${CF_TOKEN:-}" ]; then
+    echo -e "\n${CYAN}Automating Let's Encrypt Wildcard SSL (*.${DOMAIN}) via Cloudflare DNS...${NC}"
+    mkdir -p /root/.secrets/certbot
+    cat > /root/.secrets/certbot/cloudflare.ini << EOF
+dns_cloudflare_api_token = ${CF_TOKEN}
+EOF
+    chmod 600 /root/.secrets/certbot/cloudflare.ini
+
+    certbot certonly \
+        --dns-cloudflare \
+        --dns-cloudflare-credentials /root/.secrets/certbot/cloudflare.ini \
+        --dns-cloudflare-propagation-seconds 25 \
+        -d "${DOMAIN}" \
+        -d "*.${DOMAIN}" \
+        --email "admin@${DOMAIN}" \
+        --agree-tos \
+        --no-eff-email \
+        --non-interactive || echo -e "${YELLOW}Notice: Certbot initial run did not complete. You can issue certificate with 1-click in the Web UI.${NC}"
+
+    if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+        TLS_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+        TLS_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+        echo -e "${GREEN}Let's Encrypt Wildcard certificate issued successfully!${NC}"
+    fi
+fi
 
 cat > /etc/gravity/gravity.yaml << EOF
 # GravityDNS Master Configuration

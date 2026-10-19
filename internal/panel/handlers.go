@@ -8,6 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -375,6 +379,126 @@ func (h *APIHandler) handleReloadCertificate(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// handleAutoIssueCertificate automates issuing genuine Let's Encrypt Wildcard SSL certificates via Cloudflare DNS.
+func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		APIToken string `json:"api_token"`
+		Email    string `json:"email"`
+		Domain   string `json:"domain"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	domain := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(req.Domain), "."), ".")
+	if domain == "" {
+		domain = h.cfg.Server.Domain
+	}
+	if domain == "" {
+		writeError(w, http.StatusBadRequest, "Base domain is not configured. Please save base domain first.")
+		return
+	}
+
+	apiToken := strings.TrimSpace(req.APIToken)
+	if apiToken == "" {
+		writeError(w, http.StatusBadRequest, "Cloudflare API token is required.")
+		return
+	}
+
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		email = "admin@" + domain
+	}
+
+	if runtime.GOOS != "linux" {
+		writeError(w, http.StatusBadRequest, "Automated certbot issuance is supported on Linux servers (Ubuntu/Debian). On Windows local dev, please use the upload certificate option.")
+		return
+	}
+
+	// 1. Ensure certbot and python3-certbot-dns-cloudflare are installed
+	if _, err := exec.LookPath("certbot"); err != nil {
+		installCmd := exec.Command("apt-get", "update", "-y")
+		_ = installCmd.Run()
+		installPkg := exec.Command("apt-get", "install", "-y", "--no-install-recommends", "certbot", "python3-certbot-dns-cloudflare")
+		if out, err := installPkg.CombinedOutput(); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to install certbot packages: %v\nOutput: %s", err, string(out)))
+			return
+		}
+	}
+
+	// 2. Write Cloudflare credentials file
+	secretDir := "/root/.secrets/certbot"
+	_ = os.MkdirAll(secretDir, 0700)
+	iniPath := filepath.Join(secretDir, "cloudflare.ini")
+	iniContent := fmt.Sprintf("dns_cloudflare_api_token = %s\n", apiToken)
+	if err := os.WriteFile(iniPath, []byte(iniContent), 0600); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to write Cloudflare credentials file: "+err.Error())
+		return
+	}
+
+	// 3. Execute Certbot ACME DNS-01 Challenge for domain and wildcard *.domain
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "certbot", "certonly",
+		"--dns-cloudflare",
+		"--dns-cloudflare-credentials", iniPath,
+		"--dns-cloudflare-propagation-seconds", "25",
+		"-d", domain,
+		"-d", "*."+domain,
+		"--email", email,
+		"--agree-tos",
+		"--no-eff-email",
+		"--non-interactive",
+	)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Certbot issuance failed: %v\nDetails:\n%s", err, string(out)))
+		return
+	}
+
+	// 4. Verify issued certificates and apply dynamically
+	certPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", domain)
+	keyPath := fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", domain)
+
+	if _, err := os.Stat(certPath); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Certificate file not found at %s after certbot execution.\nOutput:\n%s", certPath, string(out)))
+		return
+	}
+
+	// Setup deploy hook for future automatic renewals
+	deployHookDir := "/etc/letsencrypt/renewal-hooks/deploy"
+	_ = os.MkdirAll(deployHookDir, 0755)
+	hookScript := "#!/usr/bin/env bash\nset -euo pipefail\nif systemctl is-active --quiet gravity.service; then\n    systemctl restart gravity.service\nfi\n"
+	_ = os.WriteFile(filepath.Join(deployHookDir, "gravitydns.sh"), []byte(hookScript), 0755)
+
+	// Update configuration
+	h.cfg.DNS.TLSCertFile = certPath
+	h.cfg.DNS.TLSKeyFile = keyPath
+	_ = config.SaveConfig(h.cfg)
+
+	// Reload DNS engine dynamically
+	if h.dnsEngine != nil {
+		_ = h.dnsEngine.ReloadCertificatesFromDisk()
+	}
+
+	var certInfo dnsengine.CertInfo
+	if h.dnsEngine != nil {
+		certInfo = h.dnsEngine.GetCertificateInfo()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"message":   "Let's Encrypt Wildcard certificate issued and applied successfully!",
+		"cert_info": certInfo,
+		"log":       string(out),
+	})
 }
 
 // ==================== REDIS SERVER MANAGEMENT ====================

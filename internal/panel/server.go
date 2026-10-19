@@ -123,6 +123,7 @@ func (s *Server) Start() error {
 		protected.Get("/api/settings/certificate", api.handleGetCertificateInfo)
 		protected.Post("/api/settings/certificate", api.handleUploadCertificate)
 		protected.Post("/api/settings/certificate/reload", api.handleReloadCertificate)
+		protected.Post("/api/settings/certificate/auto-issue", api.handleAutoIssueCertificate)
 
 		// Redis Server Management
 		protected.Get("/api/redis/info", api.handleGetRedisInfo)
