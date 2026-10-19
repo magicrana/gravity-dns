@@ -412,6 +412,136 @@ func (h *APIHandler) handleReloadCertificate(w http.ResponseWriter, r *http.Requ
 }
 
 // handleAutoIssueCertificate automates issuing genuine Let's Encrypt Wildcard SSL certificates via Cloudflare DNS.
+func getApexDomain(domain string) string {
+	parts := strings.Split(strings.Trim(domain, "."), ".")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "." + parts[len(parts)-1]
+	}
+	return domain
+}
+
+func testCloudflareAuth(token, email, domain string) (isToken bool, zoneName string, errMsg string, err error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	apex := getApexDomain(domain)
+
+	// 1. Try Token verify endpoint
+	tokenReq, _ := http.NewRequest("GET", "https://api.cloudflare.com/client/v4/user/tokens/verify", nil)
+	tokenReq.Header.Set("Authorization", "Bearer "+token)
+	tokenResp, tokenErr := client.Do(tokenReq)
+	if tokenErr == nil {
+		defer tokenResp.Body.Close()
+		var res struct {
+			Success bool `json:"success"`
+			Result  struct {
+				Status string `json:"status"`
+			} `json:"result"`
+			Errors []struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+		}
+		if json.NewDecoder(tokenResp.Body).Decode(&res) == nil && res.Success && res.Result.Status == "active" {
+			// Now verify if token has permission to access the apex zone
+			zoneReq, _ := http.NewRequest("GET", "https://api.cloudflare.com/client/v4/zones?name="+apex, nil)
+			zoneReq.Header.Set("Authorization", "Bearer "+token)
+			zoneResp, zoneErr := client.Do(zoneReq)
+			if zoneErr == nil {
+				defer zoneResp.Body.Close()
+				var zRes struct {
+					Success bool `json:"success"`
+					Result  []struct {
+						ID   string `json:"id"`
+						Name string `json:"name"`
+					} `json:"result"`
+				}
+				if json.NewDecoder(zoneResp.Body).Decode(&zRes) == nil && zRes.Success && len(zRes.Result) > 0 {
+					return true, zRes.Result[0].Name, "", nil
+				}
+			}
+			return true, apex, "", nil
+		}
+	}
+
+	// 2. Try Global API Key if email is provided
+	if email != "" && !strings.HasPrefix(email, "admin@") {
+		keyReq, _ := http.NewRequest("GET", "https://api.cloudflare.com/client/v4/zones?name="+apex, nil)
+		keyReq.Header.Set("X-Auth-Email", email)
+		keyReq.Header.Set("X-Auth-Key", token)
+		keyResp, keyErr := client.Do(keyReq)
+		if keyErr == nil {
+			defer keyResp.Body.Close()
+			var zRes struct {
+				Success bool `json:"success"`
+				Result  []struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				} `json:"result"`
+				Errors []struct {
+					Message string `json:"message"`
+				} `json:"errors"`
+			}
+			if json.NewDecoder(keyResp.Body).Decode(&zRes) == nil {
+				if zRes.Success && len(zRes.Result) > 0 {
+					return false, zRes.Result[0].Name, "", nil
+				}
+				if len(zRes.Errors) > 0 {
+					return false, "", fmt.Sprintf("Cloudflare authentication failed: %s (Please verify that your email address matches your Cloudflare login account)", zRes.Errors[0].Message), fmt.Errorf("cf auth failed")
+				}
+			}
+		}
+	}
+
+	// Helper diagnostic message based on input format
+	if len(token) == 37 {
+		return false, "", "Detected 37-character Global API Key. When using a Global API Key, you must enter your Cloudflare account login email in the Email field.", fmt.Errorf("email required")
+	}
+
+	return false, "", "Cloudflare could not verify your API Token. Please ensure your token is active and has permissions: Zone -> DNS -> Edit (All zones or " + apex + ").", fmt.Errorf("token invalid")
+}
+
+// handleTestCloudflare tests Cloudflare credentials before certificate issuance.
+func (h *APIHandler) handleTestCloudflare(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		APIToken string `json:"api_token"`
+		Email    string `json:"email"`
+		Domain   string `json:"domain"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	apiToken := strings.TrimSpace(req.APIToken)
+	email := strings.TrimSpace(req.Email)
+	domain := strings.TrimSpace(req.Domain)
+	if domain == "" {
+		domain = h.cfg.Server.Domain
+	}
+
+	if apiToken == "" {
+		writeError(w, http.StatusBadRequest, "Cloudflare API token or Global API Key is required.")
+		return
+	}
+
+	isToken, zoneName, msg, err := testCloudflareAuth(apiToken, email, domain)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
+	credType := "API Token"
+	if !isToken {
+		credType = "Global API Key"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"type":      credType,
+		"zone_name": zoneName,
+		"message":   fmt.Sprintf("Cloudflare %s verified successfully! Zone '%s' is active and ready.", credType, zoneName),
+	})
+}
+
+// handleAutoIssueCertificate automates issuing genuine Let's Encrypt Wildcard SSL certificates via Cloudflare DNS.
 func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Provider string `json:"provider"`
@@ -436,7 +566,7 @@ func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.R
 
 	apiToken := strings.TrimSpace(req.APIToken)
 	if apiToken == "" {
-		writeError(w, http.StatusBadRequest, "Cloudflare API token is required.")
+		writeError(w, http.StatusBadRequest, "Cloudflare API token or Global API Key is required.")
 		return
 	}
 
@@ -450,95 +580,60 @@ func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 1. Ensure certbot and python3-pip are installed
-	if _, err := exec.LookPath("certbot"); err != nil {
-		installCmd := exec.Command("apt-get", "update", "-y")
-		_ = installCmd.Run()
-		installPkg := exec.Command("apt-get", "install", "-y", "--no-install-recommends", "certbot", "python3-certbot-dns-cloudflare", "python3-pip")
-		if out, err := installPkg.CombinedOutput(); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to install certbot packages: %v\nOutput: %s", err, string(out)))
-			return
-		}
+	// 1. Verify credentials against Cloudflare API
+	isToken, _, authErrMsg, authErr := testCloudflareAuth(apiToken, email, domain)
+	if authErr != nil {
+		writeError(w, http.StatusBadRequest, authErrMsg)
+		return
 	}
 
-	// Ensure pip3 is installed and upgrade certbot-dns-cloudflare and cloudflare library so API Tokens work
-	if _, err := exec.LookPath("pip3"); err != nil {
-		_ = exec.Command("apt-get", "install", "-y", "--no-install-recommends", "python3-pip").Run()
-	}
-	_ = exec.Command("pip3", "install", "--upgrade", "--break-system-packages", "certbot-dns-cloudflare", "cloudflare>=2.3.1").Run()
+	// 2. Ensure modern Certbot with Cloudflare DNS plugin is installed
+	ensureCmd := exec.Command("bash", "-c", "export DEBIAN_FRONTEND=noninteractive; if ! command -v pip3 &>/dev/null; then apt-get update -y && apt-get install -y --no-install-recommends python3-pip certbot python3-certbot-dns-cloudflare; fi; pip3 install --upgrade --break-system-packages certbot certbot-dns-cloudflare 'cloudflare>=2.3.1' >/dev/null 2>&1 || true")
+	_ = ensureCmd.Run()
 
+	certbotBin := "certbot"
+	if _, err := os.Stat("/usr/local/bin/certbot"); err == nil {
+		certbotBin = "/usr/local/bin/certbot"
+	} else if _, err := os.Stat("/snap/bin/certbot"); err == nil {
+		certbotBin = "/snap/bin/certbot"
+	}
+
+	// 3. Write Cloudflare credentials configuration
 	secretDir := "/root/.secrets/certbot"
 	_ = os.MkdirAll(secretDir, 0700)
 	iniPath := filepath.Join(secretDir, "cloudflare.ini")
 
-	// Determine credential format: Cloudflare Global API Key is 37 hex characters
-	isHexString := func(s string) bool {
-		if s == "" {
-			return false
-		}
-		for _, c := range s {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-				return false
-			}
-		}
-		return true
-	}
-	isGlobalKey := len(apiToken) == 37 && isHexString(apiToken)
-
-	writeCredentials := func(useGlobal bool) error {
-		var content string
-		if useGlobal {
-			content = fmt.Sprintf("dns_cloudflare_email = %s\ndns_cloudflare_api_key = %s\n", email, apiToken)
-		} else {
-			content = fmt.Sprintf("dns_cloudflare_api_token = %s\n", apiToken)
-		}
-		return os.WriteFile(iniPath, []byte(content), 0600)
+	var iniContent string
+	if isToken {
+		iniContent = fmt.Sprintf("dns_cloudflare_api_token = %s\n", apiToken)
+	} else {
+		iniContent = fmt.Sprintf("dns_cloudflare_email = %s\ndns_cloudflare_api_key = %s\n", email, apiToken)
 	}
 
-	if err := writeCredentials(isGlobalKey); err != nil {
+	if err := os.WriteFile(iniPath, []byte(iniContent), 0600); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to write Cloudflare credentials file: "+err.Error())
 		return
 	}
 
-	// 3. Execute Certbot ACME DNS-01 Challenge for domain and wildcard *.domain
-	runCertbot := func() ([]byte, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-		defer cancel()
+	// 4. Execute Certbot ACME DNS-01 Challenge for domain and wildcard *.domain
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
 
-		cmd := exec.CommandContext(ctx, "certbot", "certonly",
-			"--dns-cloudflare",
-			"--dns-cloudflare-credentials", iniPath,
-			"--dns-cloudflare-propagation-seconds", "30",
-			"-d", domain,
-			"-d", "*."+domain,
-			"--email", email,
-			"--agree-tos",
-			"--no-eff-email",
-			"--non-interactive",
-		)
-		return cmd.CombinedOutput()
-	}
+	cmd := exec.CommandContext(ctx, certbotBin, "certonly",
+		"--dns-cloudflare",
+		"--dns-cloudflare-credentials", iniPath,
+		"--dns-cloudflare-propagation-seconds", "30",
+		"-d", domain,
+		"-d", "*."+domain,
+		"--email", email,
+		"--agree-tos",
+		"--no-eff-email",
+		"--non-interactive",
+	)
 
-	out, err := runCertbot()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		outStr := string(out)
-		// If certbot fails because it expects email + api_key format, retry with global key format
-		if !isGlobalKey && (strings.Contains(outStr, "Property \"dns_cloudflare_email\" not found") || strings.Contains(outStr, "Property \"dns_cloudflare_api_key\" not found")) {
-			if writeErr := writeCredentials(true); writeErr == nil {
-				retryOut, retryErr := runCertbot()
-				if retryErr == nil {
-					out = retryOut
-					err = nil
-				} else {
-					out = append(out, []byte("\n--- Automatic retry with Global API Key format also failed: ---\n")...)
-					out = append(out, retryOut...)
-				}
-			}
-		}
-	}
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Certbot issuance failed: %v\nDetails:\n%s\n\nCloudflare Tips:\n- If using an API Token: Ensure permissions are set to: Zone -> DNS -> Edit (All Zones or %s).\n- If using a Global API Key: Ensure you have provided your Cloudflare account login email in the Email field.", err, string(out), domain))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Certbot issuance failed: %v\nDetails:\n%s", err, string(out)))
 		return
 	}
 
