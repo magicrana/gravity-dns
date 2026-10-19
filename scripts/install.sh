@@ -332,63 +332,47 @@ cp -r "${SOURCE_DIR}/web" /var/lib/gravity/
 # Automated Let's Encrypt Wildcard SSL provisioning if Cloudflare credentials provided
 if [ -n "${CF_TOKEN:-}" ]; then
     echo -e "\n${CYAN}Automating Let's Encrypt Wildcard SSL (*.${DOMAIN}) via Cloudflare DNS...${NC}"
-    mkdir -p /root/.secrets/certbot
+    mkdir -p /etc/gravity /var/lib/gravity
     CF_EMAIL="${CF_EMAIL:-admin@${DOMAIN}}"
-
-    write_cf_ini() {
-        local use_global="$1"
-        if [ "$use_global" = "true" ]; then
-            cat > /root/.secrets/certbot/cloudflare.ini << EOF
-dns_cloudflare_email = ${CF_EMAIL}
-dns_cloudflare_api_key = ${CF_TOKEN}
-EOF
-        else
-            cat > /root/.secrets/certbot/cloudflare.ini << EOF
-dns_cloudflare_api_token = ${CF_TOKEN}
-EOF
-        fi
-        chmod 600 /root/.secrets/certbot/cloudflare.ini
-    }
 
     IS_GLOBAL=false
     if echo "${CF_TOKEN}" | grep -Eq '^[0-9a-fA-F]{37}$'; then
         IS_GLOBAL=true
     fi
 
-    write_cf_ini "$IS_GLOBAL"
+    APEX_DOMAIN=$(echo "${DOMAIN}" | awk -F. '{if (NF>1) print $(NF-1)"."$NF; else print $0}')
 
-    CERTBOT_OUT=$(certbot certonly \
-        --dns-cloudflare \
-        --dns-cloudflare-credentials /root/.secrets/certbot/cloudflare.ini \
-        --dns-cloudflare-propagation-seconds 30 \
+    cat > /etc/gravity/cf-creds.json << EOF
+{
+  "token": "${CF_TOKEN}",
+  "email": "${CF_EMAIL}",
+  "is_token": $([ "$IS_GLOBAL" = "true" ] && echo "false" || echo "true"),
+  "apex": "${APEX_DOMAIN}"
+}
+EOF
+    cp -f /etc/gravity/cf-creds.json /var/lib/gravity/cf-creds.json
+    chmod 600 /etc/gravity/cf-creds.json /var/lib/gravity/cf-creds.json
+
+    AUTH_HOOK="${SOURCE_DIR:-/opt/gravity-dns}/scripts/cf-auth-hook.sh"
+    CLEANUP_HOOK="${SOURCE_DIR:-/opt/gravity-dns}/scripts/cf-cleanup-hook.sh"
+    chmod +x "${AUTH_HOOK}" "${CLEANUP_HOOK}" 2>/dev/null || true
+
+    certbot certonly \
+        --manual \
+        --preferred-challenges dns \
+        --manual-auth-hook "${AUTH_HOOK}" \
+        --manual-cleanup-hook "${CLEANUP_HOOK}" \
         -d "${DOMAIN}" \
         -d "*.${DOMAIN}" \
         --email "${CF_EMAIL}" \
         --agree-tos \
         --no-eff-email \
-        --non-interactive 2>&1) || CERTBOT_EXIT=$?
-
-    if [ "${CERTBOT_EXIT:-0}" -ne 0 ] && [ "$IS_GLOBAL" = "false" ] && echo "$CERTBOT_OUT" | grep -q "Property \"dns_cloudflare_email\" not found"; then
-        echo -e "${YELLOW}Retrying with Cloudflare Global API Key format...${NC}"
-        write_cf_ini "true"
-        certbot certonly \
-            --dns-cloudflare \
-            --dns-cloudflare-credentials /root/.secrets/certbot/cloudflare.ini \
-            --dns-cloudflare-propagation-seconds 30 \
-            -d "${DOMAIN}" \
-            -d "*.${DOMAIN}" \
-            --email "${CF_EMAIL}" \
-            --agree-tos \
-            --no-eff-email \
-            --non-interactive 2>&1 || true
-    fi
+        --non-interactive || echo -e "${YELLOW}Notice: Certbot initial run did not complete. You can issue or retry certificate with 1-click in the Web UI.${NC}"
 
     if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
         TLS_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
         TLS_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
         echo -e "${GREEN}Let's Encrypt Wildcard certificate issued successfully!${NC}"
-    else
-        echo -e "${YELLOW}Notice: Certbot initial run did not complete. You can issue or retry certificate with 1-click in the Web UI.${NC}"
     fi
 fi
 

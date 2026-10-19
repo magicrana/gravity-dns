@@ -73,31 +73,36 @@ case "$CHOICE" in
         read -rp "Enter Cloudflare Account Email (Required if using Global API Key): " CF_EMAIL
         CF_EMAIL="${CF_EMAIL:-admin@${DOMAIN}}"
 
-        echo -e "\n${CYAN}Installing Certbot Cloudflare DNS plugin & updating python-cloudflare...${NC}"
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -y
-        apt-get install -y --no-install-recommends certbot python3-certbot-dns-cloudflare python3-pip
-        pip3 install --upgrade --break-system-packages certbot certbot-dns-cloudflare "cloudflare>=2.3.1" >/dev/null 2>&1 || true
-
-        mkdir -p /root/.secrets/certbot
-        if echo "${CF_TOKEN}" | grep -Eq '^[0-9a-fA-F]{37}$'; then
-            cat > /root/.secrets/certbot/cloudflare.ini << EOF
-dns_cloudflare_email = ${CF_EMAIL}
-dns_cloudflare_api_key = ${CF_TOKEN}
-EOF
-        else
-            cat > /root/.secrets/certbot/cloudflare.ini << EOF
-dns_cloudflare_api_token = ${CF_TOKEN}
-EOF
-        fi
-        chmod 600 /root/.secrets/certbot/cloudflare.ini
-
         echo -e "\n${CYAN}Requesting Wildcard Certificate from Let's Encrypt for ${DOMAIN} and *.${DOMAIN}...${NC}"
 
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        mkdir -p /etc/gravity /var/lib/gravity
+        APEX_DOMAIN=$(echo "${DOMAIN}" | awk -F. '{if (NF>1) print $(NF-1)"."$NF; else print $0}')
+        IS_GLOBAL=false
+        if echo "${CF_TOKEN}" | grep -Eq '^[0-9a-fA-F]{37}$'; then
+            IS_GLOBAL=true
+        fi
+
+        cat > /etc/gravity/cf-creds.json << EOF
+{
+  "token": "${CF_TOKEN}",
+  "email": "${CF_EMAIL}",
+  "is_token": $([ "$IS_GLOBAL" = "true" ] && echo "false" || echo "true"),
+  "apex": "${APEX_DOMAIN}"
+}
+EOF
+        cp -f /etc/gravity/cf-creds.json /var/lib/gravity/cf-creds.json
+        chmod 600 /etc/gravity/cf-creds.json /var/lib/gravity/cf-creds.json
+
+        AUTH_HOOK="${SCRIPT_DIR}/cf-auth-hook.sh"
+        CLEANUP_HOOK="${SCRIPT_DIR}/cf-cleanup-hook.sh"
+        chmod +x "${AUTH_HOOK}" "${CLEANUP_HOOK}" 2>/dev/null || true
+
         certbot certonly \
-            --dns-cloudflare \
-            --dns-cloudflare-credentials /root/.secrets/certbot/cloudflare.ini \
-            --dns-cloudflare-propagation-seconds 30 \
+            --manual \
+            --preferred-challenges dns \
+            --manual-auth-hook "${AUTH_HOOK}" \
+            --manual-cleanup-hook "${CLEANUP_HOOK}" \
             -d "${DOMAIN}" \
             -d "*.${DOMAIN}" \
             --email "${CF_EMAIL}" \

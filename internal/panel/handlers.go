@@ -587,42 +587,49 @@ func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 2. Ensure modern Certbot with Cloudflare DNS plugin is installed
-	ensureCmd := exec.Command("bash", "-c", "export DEBIAN_FRONTEND=noninteractive; if ! command -v pip3 &>/dev/null; then apt-get update -y && apt-get install -y --no-install-recommends python3-pip certbot python3-certbot-dns-cloudflare; fi; pip3 install --upgrade --break-system-packages certbot certbot-dns-cloudflare 'cloudflare>=2.3.1' >/dev/null 2>&1 || true")
-	_ = ensureCmd.Run()
-
-	certbotBin := "certbot"
-	if _, err := os.Stat("/usr/local/bin/certbot"); err == nil {
-		certbotBin = "/usr/local/bin/certbot"
-	} else if _, err := os.Stat("/snap/bin/certbot"); err == nil {
-		certbotBin = "/snap/bin/certbot"
+	// 2. Ensure certbot is installed
+	if _, err := exec.LookPath("certbot"); err != nil {
+		cmd := exec.Command("apt-get", "update", "-y")
+		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+		_ = cmd.Run()
+		installCmd := exec.Command("apt-get", "install", "-y", "--no-install-recommends", "certbot", "curl", "python3")
+		installCmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+		if out, err := installCmd.CombinedOutput(); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to install certbot: %v\nOutput: %s", err, string(out)))
+			return
+		}
 	}
 
-	// 3. Write Cloudflare credentials configuration
-	secretDir := "/root/.secrets/certbot"
-	_ = os.MkdirAll(secretDir, 0700)
-	iniPath := filepath.Join(secretDir, "cloudflare.ini")
-
-	var iniContent string
-	if isToken {
-		iniContent = fmt.Sprintf("dns_cloudflare_api_token = %s\n", apiToken)
-	} else {
-		iniContent = fmt.Sprintf("dns_cloudflare_email = %s\ndns_cloudflare_api_key = %s\n", email, apiToken)
+	// 3. Write Cloudflare credentials JSON for auth hook
+	credsData := map[string]interface{}{
+		"token":    apiToken,
+		"email":    email,
+		"is_token": isToken,
+		"apex":     getApexDomain(domain),
 	}
+	credsJSON, _ := json.Marshal(credsData)
+	_ = os.MkdirAll("/etc/gravity", 0755)
+	_ = os.WriteFile("/etc/gravity/cf-creds.json", credsJSON, 0600)
+	_ = os.MkdirAll("/var/lib/gravity", 0755)
+	_ = os.WriteFile("/var/lib/gravity/cf-creds.json", credsJSON, 0600)
 
-	if err := os.WriteFile(iniPath, []byte(iniContent), 0600); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to write Cloudflare credentials file: "+err.Error())
-		return
-	}
+	// Ensure auth hook and cleanup hook exist and are executable in /var/lib/gravity
+	authHook := "/var/lib/gravity/cf-auth-hook.sh"
+	cleanupHook := "/var/lib/gravity/cf-cleanup-hook.sh"
+	_ = os.WriteFile(authHook, []byte(cfAuthHookScript), 0755)
+	_ = os.WriteFile(cleanupHook, []byte(cfCleanupHookScript), 0755)
+	_ = exec.Command("chmod", "+x", authHook, cleanupHook).Run()
 
-	// 4. Execute Certbot ACME DNS-01 Challenge for domain and wildcard *.domain
+	// 4. Execute Certbot ACME DNS-01 Challenge with automated Cloudflare hooks
+	// This uses native Cloudflare REST API via hooks, completely bypassing broken python3-certbot-dns-cloudflare packages
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, certbotBin, "certonly",
-		"--dns-cloudflare",
-		"--dns-cloudflare-credentials", iniPath,
-		"--dns-cloudflare-propagation-seconds", "30",
+	cmd := exec.CommandContext(ctx, "certbot", "certonly",
+		"--manual",
+		"--preferred-challenges", "dns",
+		"--manual-auth-hook", authHook,
+		"--manual-cleanup-hook", cleanupHook,
 		"-d", domain,
 		"-d", "*."+domain,
 		"--email", email,
@@ -1101,3 +1108,151 @@ func (h *APIHandler) handleGetServerInfo(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, info)
 }
+
+const cfAuthHookScript = `#!/usr/bin/env bash
+# GravityDNS - Automated Cloudflare ACME DNS-01 Challenge Hook
+set -euo pipefail
+
+CREDS_FILE="${GRAVITY_CF_CREDS:-/etc/gravity/cf-creds.json}"
+if [ ! -f "$CREDS_FILE" ]; then
+    CREDS_FILE="/var/lib/gravity/cf-creds.json"
+fi
+
+if [ ! -f "$CREDS_FILE" ]; then
+    echo "[ERROR] Cloudflare credentials missing at $CREDS_FILE" >&2
+    exit 1
+fi
+
+get_json_val() {
+    local key="$1"
+    local file="$2"
+    if command -v python3 &>/dev/null; then
+        python3 -c "import json, sys; d=json.load(open('$file')); print(d.get('$key',''))" 2>/dev/null && return
+    fi
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*" "$file" 2>/dev/null | head -n1 | sed -E "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"//"
+}
+
+CF_TOKEN=$(get_json_val "token" "$CREDS_FILE")
+CF_EMAIL=$(get_json_val "email" "$CREDS_FILE")
+IS_TOKEN=$(get_json_val "is_token" "$CREDS_FILE")
+APEX=$(get_json_val "apex" "$CREDS_FILE")
+
+if [ -z "$CF_TOKEN" ]; then
+    echo "[ERROR] Cloudflare token is empty in $CREDS_FILE" >&2
+    exit 1
+fi
+
+if [ "$IS_TOKEN" = "false" ]; then
+    AUTH_H1="X-Auth-Key: ${CF_TOKEN}"
+    AUTH_H2="X-Auth-Email: ${CF_EMAIL}"
+else
+    AUTH_H1="Authorization: Bearer ${CF_TOKEN}"
+    AUTH_H2=""
+fi
+
+if [ -n "$AUTH_H2" ]; then
+    ZONE_RES=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=${APEX}" \
+        -H "${AUTH_H1}" \
+        -H "${AUTH_H2}" \
+        -H "Content-Type: application/json")
+else
+    ZONE_RES=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=${APEX}" \
+        -H "${AUTH_H1}" \
+        -H "Content-Type: application/json")
+fi
+
+ZONE_ID=$(echo "$ZONE_RES" | grep -o '"id":"[^"]*' | head -n1 | cut -d'"' -f4)
+if [ -z "$ZONE_ID" ]; then
+    echo "[ERROR] Could not resolve Cloudflare Zone ID for ${APEX}. Response: $ZONE_RES" >&2
+    exit 1
+fi
+
+CLEAN_DOMAIN=$(echo "${CERTBOT_DOMAIN}" | sed 's/^\*\.//')
+RECORD_NAME="_acme-challenge.${CLEAN_DOMAIN}"
+
+PAYLOAD="{\"type\":\"TXT\",\"name\":\"${RECORD_NAME}\",\"content\":\"${CERTBOT_VALIDATION}\",\"ttl\":60}"
+
+if [ -n "$AUTH_H2" ]; then
+    CREATE_RES=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records" \
+        -H "${AUTH_H1}" \
+        -H "${AUTH_H2}" \
+        -H "Content-Type: application/json" \
+        --data "$PAYLOAD")
+else
+    CREATE_RES=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records" \
+        -H "${AUTH_H1}" \
+        -H "Content-Type: application/json" \
+        --data "$PAYLOAD")
+fi
+
+RECORD_ID=$(echo "$CREATE_RES" | grep -o '"id":"[^"]*' | head -n1 | cut -d'"' -f4)
+if [ -z "$RECORD_ID" ]; then
+    echo "[ERROR] Failed to create TXT record ${RECORD_NAME} in Cloudflare. Response: $CREATE_RES" >&2
+    exit 1
+fi
+
+TRACK_DIR="/tmp/gravity_acme_records"
+mkdir -p "$TRACK_DIR"
+echo "${ZONE_ID}:${RECORD_ID}" >> "${TRACK_DIR}/${CERTBOT_VALIDATION}"
+
+echo "[GravityDNS] Successfully created ACME TXT record in Cloudflare DNS for ${RECORD_NAME} (ID: ${RECORD_ID})."
+sleep 15
+`
+
+const cfCleanupHookScript = `#!/usr/bin/env bash
+# GravityDNS - Cloudflare ACME DNS-01 Cleanup Hook
+set -euo pipefail
+
+CREDS_FILE="${GRAVITY_CF_CREDS:-/etc/gravity/cf-creds.json}"
+if [ ! -f "$CREDS_FILE" ]; then
+    CREDS_FILE="/var/lib/gravity/cf-creds.json"
+fi
+
+if [ ! -f "$CREDS_FILE" ]; then
+    exit 0
+fi
+
+get_json_val() {
+    local key="$1"
+    local file="$2"
+    if command -v python3 &>/dev/null; then
+        python3 -c "import json, sys; d=json.load(open('$file')); print(d.get('$key',''))" 2>/dev/null && return
+    fi
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*" "$file" 2>/dev/null | head -n1 | sed -E "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"//"
+}
+
+CF_TOKEN=$(get_json_val "token" "$CREDS_FILE")
+CF_EMAIL=$(get_json_val "email" "$CREDS_FILE")
+IS_TOKEN=$(get_json_val "is_token" "$CREDS_FILE")
+
+if [ -z "$CF_TOKEN" ]; then
+    exit 0
+fi
+
+if [ "$IS_TOKEN" = "false" ]; then
+    AUTH_H1="X-Auth-Key: ${CF_TOKEN}"
+    AUTH_H2="X-Auth-Email: ${CF_EMAIL}"
+else
+    AUTH_H1="Authorization: Bearer ${CF_TOKEN}"
+    AUTH_H2=""
+fi
+
+REC_FILE="/tmp/gravity_acme_records/${CERTBOT_VALIDATION:-}"
+if [ -f "$REC_FILE" ]; then
+    while IFS=: read -r ZONE_ID RECORD_ID; do
+        if [ -n "$ZONE_ID" ] && [ -n "$RECORD_ID" ]; then
+            if [ -n "$AUTH_H2" ]; then
+                curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records/${RECORD_ID}" \
+                    -H "${AUTH_H1}" \
+                    -H "${AUTH_H2}" \
+                    -H "Content-Type: application/json" >/dev/null 2>&1 || true
+            else
+                curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records/${RECORD_ID}" \
+                    -H "${AUTH_H1}" \
+                    -H "Content-Type: application/json" >/dev/null 2>&1 || true
+            fi
+        fi
+    done < "$REC_FILE"
+    rm -f "$REC_FILE"
+fi
+`
