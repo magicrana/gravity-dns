@@ -1,0 +1,76 @@
+# ==============================================================================
+# GravityDNS - Production Configuration
+# ==============================================================================
+
+# Server Identity & Network
+server:
+  # Base wildcard domain configured in DNS (e.g., *.dns.example.com -> VPS IP)
+  domain: "dns.example.com"
+
+  # Public IPv4 address of this VPS (used for selective hijack A responses)
+  public_ipv4: "203.0.113.1"
+
+  # Public IPv6 address of this VPS (optional, leave blank to force IPv4)
+  public_ipv6: ""
+
+# DNS Engine Settings (DoT on :853 & DoH on :8443)
+dns:
+  enabled: true
+  dot_listen: "0.0.0.0:853"
+  doh_listen: "0.0.0.0:8443"
+
+  # Path to Let's Encrypt Wildcard TLS Certificates (*.dns.example.com)
+  tls_cert_file: "/etc/letsencrypt/live/dns.example.com/fullchain.pem"
+  tls_key_file: "/etc/letsencrypt/live/dns.example.com/privkey.pem"
+
+  # Upstream recursive DNS servers for non-hijacked queries
+  upstream_dns:
+    - "1.1.1.1:53"
+    - "8.8.8.8:53"
+    - "9.9.9.9:53"
+
+  # Low TTL (seconds) for spoofed/hijacked responses to prevent persistent caching
+  spoof_ttl: 60
+
+  # Sliding-window concurrency duration in seconds (600s = 10 minutes)
+  device_window_sec: 600
+
+# Transparent TLS SNI Proxy Engine (:443)
+sniproxy:
+  enabled: true
+  listen: "0.0.0.0:443"
+
+  # Dedicated upstream DNS to resolve genuine origin IPs (avoids routing loops)
+  upstream_dns:
+    - "1.1.1.1:53"
+    - "8.8.8.8:53"
+
+  # Connection dial timeout to origin in seconds
+  connect_timeout: 5
+
+  # Idle connection timeout in seconds before closing inactive streams
+  idle_timeout: 300
+
+  # Enforce hijack rules: only proxy traffic matching active rules in database
+  enforce_rules: true
+
+# Redis Cache & Sliding Window State Store
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+# Control Plane & Web Management Panel (:8080)
+panel:
+  enabled: true
+  listen: "0.0.0.0:8080"
+
+  # Cryptographic secret used to sign Admin JWT session tokens (Change in production!)
+  jwt_secret: "gravitydns-change-this-jwt-secret-in-production-random-uuid"
+
+  # Initial Master Admin Credentials (initialized automatically on first boot)
+  admin_username: "admin"
+  admin_password: "adminpassword123"
+
+  # Admin session duration in hours
+  session_ttl: 24

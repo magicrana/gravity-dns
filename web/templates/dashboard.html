@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GravityDNS - Admin Control Plane</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            400: '#818cf8',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        },
+                        darkbg: '#080b11',
+                        darkpanel: '#0e1320',
+                        darkcard: '#13192b',
+                        darkborder: '#1e263d',
+                        darkhover: '#192238',
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #080b11;
+        }
+        .code-font {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .glass-panel {
+            background-color: rgba(19, 25, 43, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid #1e263d;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0e1320;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #232d47;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #37446b;
+        }
+    </style>
+</head>
+<body class="text-slate-200 min-h-screen flex flex-col bg-darkbg">
+    <!-- Top Navigation Header -->
+    <header class="bg-darkpanel border-b border-darkborder sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg font-bold tracking-tight text-white">Gravity<span class="text-indigo-400">DNS</span></span>
+                        <span class="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">v1.0 Pro</span>
+                    </div>
+                    <div class="text-[11px] text-slate-400 flex items-center gap-2">
+                        <span>Base: <b class="code-font text-slate-300" id="header-domain">{{.BaseDomain}}</b></span>
+                        <span>&bull;</span>
+                        <span>VPS IPv4: <b class="code-font text-slate-300" id="header-ipv4">{{.PublicIPv4}}</b></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Health Status & Actions -->
+            <div class="flex items-center gap-3">
+                <div class="hidden md:flex items-center gap-2 text-xs">
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        DoT :853
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        SNI :443
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-medium">
+                        <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                        DoH :8443
+                    </span>
+                </div>
+
+                <div class="h-6 w-px bg-darkborder hidden md:block"></div>
+
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-400 hidden sm:inline">Admin: <strong class="text-white">{{.Username}}</strong></span>
+                    <button onclick="openChangePasswordModal()" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-darkcard transition" title="Change Admin Password">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                        </svg>
+                    </button>
+                    <button onclick="handleLogout()" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 transition flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                        </svg>
+                        Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        <!-- Overview Stats Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- Total Queries -->
+            <div class="glass-panel rounded-2xl p-5 border border-darkborder">
+                <div class="flex items-center justify-between text-slate-400 mb-3">
+                    <span class="text-xs font-semibold uppercase tracking-wider">Total Queries</span>
+                    <div class="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="text-3xl font-extrabold text-white" id="stat-total-queries">0</div>
+                <div class="mt-2 text-xs text-slate-400 flex items-center gap-2">
+                    <span class="text-emerald-400 font-semibold" id="stat-hijacked-pct">0%</span> hijacked
+                    <span class="text-slate-600">&bull;</span>
+                    <span id="stat-forwarded-queries">0</span> forwarded
+                </div>
+            </div>
+
+            <!-- Active Users -->
+            <div class="glass-panel rounded-2xl p-5 border border-darkborder">
+                <div class="flex items-center justify-between text-slate-400 mb-3">
+                    <span class="text-xs font-semibold uppercase tracking-wider">Active Users</span>
+                    <div class="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="text-3xl font-extrabold text-white" id="stat-active-users">0</div>
+                <div class="mt-2 text-xs text-slate-400">
+                    Out of <span class="text-white font-semibold" id="stat-total-users">0</span> registered tokens
+                </div>
+            </div>
+
+            <!-- Concurrent Devices Online -->
+            <div class="glass-panel rounded-2xl p-5 border border-darkborder">
+                <div class="flex items-center justify-between text-slate-400 mb-3">
+                    <span class="text-xs font-semibold uppercase tracking-wider">Active Devices (10m)</span>
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="text-3xl font-extrabold text-white" id="stat-active-devices">0</div>
+                <div class="mt-2 text-xs text-slate-400 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    Sliding window active IPs
+                </div>
+            </div>
+
+            <!-- Hijack Rules -->
+            <div class="glass-panel rounded-2xl p-5 border border-darkborder">
+                <div class="flex items-center justify-between text-slate-400 mb-3">
+                    <span class="text-xs font-semibold uppercase tracking-wider">Hijacked Domains</span>
+                    <div class="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="text-3xl font-extrabold text-white" id="stat-total-rules">0</div>
+                <div class="mt-2 text-xs text-slate-400">
+                    <span class="text-purple-400 font-semibold" id="stat-refused-queries">0</span> queries refused (limit/auth)
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="border-b border-darkborder flex items-center justify-between">
+            <nav class="flex space-x-6">
+                <button onclick="switchTab('users')" id="tab-btn-users" class="tab-btn active pb-4 text-sm font-semibold border-b-2 border-indigo-500 text-indigo-400 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                    </svg>
+                    User Management
+                </button>
+                <button onclick="switchTab('devices')" id="tab-btn-devices" class="tab-btn pb-4 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                    Live Device Sessions
+                </button>
+                <button onclick="switchTab('rules')" id="tab-btn-rules" class="tab-btn pb-4 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                    </svg>
+                    Domain Rules & Presets
+                </button>
+                <button onclick="switchTab('logs')" id="tab-btn-logs" class="tab-btn pb-4 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    Live Query Stream
+                </button>
+                <button onclick="switchTab('setup')" id="tab-btn-setup" class="tab-btn pb-4 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    Client Setup Guides
+                </button>
+            </nav>
+
+            <div class="pb-2 flex items-center gap-2">
+                <button onclick="refreshCurrentTab()" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-darkcard transition" title="Refresh Current Data">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- TAB 1: USERS MANAGEMENT -->
+        <section id="tab-users" class="space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-white">Client Users & Tokens</h2>
+                    <p class="text-xs text-slate-400">Manage client subdomains, concurrent device limits, and subscription periods.</p>
+                </div>
+                <button onclick="openCreateUserModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Add New User
+                </button>
+            </div>
+
+            <div class="glass-panel rounded-2xl border border-darkborder overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-darkpanel text-slate-400 text-xs uppercase tracking-wider border-b border-darkborder">
+                            <tr>
+                                <th class="py-3.5 px-4">User / Token</th>
+                                <th class="py-3.5 px-4">Status</th>
+                                <th class="py-3.5 px-4">Device Limit (10m)</th>
+                                <th class="py-3.5 px-4">Expiration</th>
+                                <th class="py-3.5 px-4">Quick Setup</th>
+                                <th class="py-3.5 px-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body" class="divide-y divide-darkborder">
+                            <tr>
+                                <td colspan="6" class="text-center py-8 text-slate-500">Loading users...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: LIVE DEVICE SESSIONS -->
+        <section id="tab-devices" class="hidden space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-white">Active Device Sessions</h2>
+                    <p class="text-xs text-slate-400">Real-time inspection of active client IPs in the 10-minute sliding window.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-slate-400">Auto-refresh (3s):</span>
+                    <input type="checkbox" id="auto-refresh-toggle" checked class="w-4 h-4 accent-indigo-600 rounded">
+                </div>
+            </div>
+
+            <div class="glass-panel rounded-2xl border border-darkborder overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-darkpanel text-slate-400 text-xs uppercase tracking-wider border-b border-darkborder">
+                            <tr>
+                                <th class="py-3.5 px-4">Client IP</th>
+                                <th class="py-3.5 px-4">Assigned User</th>
+                                <th class="py-3.5 px-4">Last Active</th>
+                                <th class="py-3.5 px-4">Window Time Remaining</th>
+                                <th class="py-3.5 px-4 text-right">Session Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devices-table-body" class="divide-y divide-darkborder">
+                            <tr>
+                                <td colspan="5" class="text-center py-8 text-slate-500">Loading active sessions...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: DOMAIN RULES & PRESETS -->
+        <section id="tab-rules" class="hidden space-y-6">
+            <!-- Streaming Presets Showcase -->
+            <div>
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h2 class="text-lg font-bold text-white">Streaming Service Presets</h2>
+                        <p class="text-xs text-slate-400">Activate popular streaming platforms with 1-click domain bundling.</p>
+                    </div>
+                </div>
+                <div id="presets-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
+
+            <!-- Custom Domain Rules Table -->
+            <div class="space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                        <h3 class="text-lg font-bold text-white">Custom Domain Spoofing Rules</h3>
+                        <p class="text-xs text-slate-400">Domains hijacked and rerouted to VPS IPv4 with low TTL (60s).</p>
+                    </div>
+                    <button onclick="openAddRuleModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Add Custom Domain
+                    </button>
+                </div>
+
+                <div class="glass-panel rounded-2xl border border-darkborder overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-darkpanel text-slate-400 text-xs uppercase tracking-wider border-b border-darkborder">
+                                <tr>
+                                    <th class="py-3.5 px-4">Domain Pattern</th>
+                                    <th class="py-3.5 px-4">Category</th>
+                                    <th class="py-3.5 px-4">Status</th>
+                                    <th class="py-3.5 px-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rules-table-body" class="divide-y divide-darkborder">
+                                <tr>
+                                    <td colspan="4" class="text-center py-8 text-slate-500">Loading domain rules...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: LIVE QUERY STREAM -->
+        <section id="tab-logs" class="hidden space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-white">Live DNS Query Stream</h2>
+                    <p class="text-xs text-slate-400">Real-time log of the latest 50 DNS resolutions and access control decisions.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="fetchLogs()" class="px-3 py-1.5 rounded-lg bg-darkcard border border-darkborder hover:bg-darkhover text-xs font-medium text-slate-300">
+                        Refresh Logs
+                    </button>
+                </div>
+            </div>
+
+            <div class="glass-panel rounded-2xl border border-darkborder overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-darkpanel text-slate-400 uppercase tracking-wider border-b border-darkborder">
+                            <tr>
+                                <th class="py-3 px-4">Time</th>
+                                <th class="py-3 px-4">User</th>
+                                <th class="py-3 px-4">Client IP</th>
+                                <th class="py-3 px-4">Requested Domain</th>
+                                <th class="py-3 px-4">Type</th>
+                                <th class="py-3 px-4">Protocol</th>
+                                <th class="py-3 px-4 text-right">Resolution Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-table-body" class="divide-y divide-darkborder code-font">
+                            <tr>
+                                <td colspan="7" class="text-center py-8 text-slate-500 font-sans">Awaiting queries...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 5: CLIENT SETUP & GUIDES -->
+        <section id="tab-setup" class="hidden space-y-6">
+            <div>
+                <h2 class="text-xl font-bold text-white">Device Configuration Guides</h2>
+                <p class="text-xs text-slate-400">How to configure devices with zero VPN client installations.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Android Guide -->
+                <div class="glass-panel rounded-2xl p-6 border border-darkborder space-y-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold">
+                            🤖
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Android (Private DNS)</h3>
+                            <p class="text-xs text-slate-400">Android 9+ native DNS-over-TLS</p>
+                        </div>
+                    </div>
+                    <ol class="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                        <li>Open device <strong>Settings</strong> &rarr; <strong>Network & Internet</strong> (or Connections).</li>
+                        <li>Tap <strong>Private DNS</strong>.</li>
+                        <li>Select <strong>Private DNS provider hostname</strong>.</li>
+                        <li>Enter user endpoint: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">&lt;token&gt;.{{.BaseDomain}}</code></li>
+                        <li>Tap <strong>Save</strong>. All apps now bypass geo-blocks automatically!</li>
+                    </ol>
+                </div>
+
+                <!-- Apple iOS / macOS Guide -->
+                <div class="glass-panel rounded-2xl p-6 border border-darkborder space-y-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center font-bold">
+                            🍏
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Apple iOS / iPadOS / macOS</h3>
+                            <p class="text-xs text-slate-400">One-click .mobileconfig profile</p>
+                        </div>
+                    </div>
+                    <ol class="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                        <li>Go to <strong>User Management</strong> tab and click <strong>Quick Setup</strong> for the user.</li>
+                        <li>Tap <strong>Download iOS Profile</strong>.</li>
+                        <li>Open device <strong>Settings</strong> &rarr; tap <strong>Profile Downloaded</strong> at the top.</li>
+                        <li>Tap <strong>Install</strong> in the top-right corner.</li>
+                        <li>iOS will natively encrypt and route DNS queries via GravityDNS!</li>
+                    </ol>
+                </div>
+
+                <!-- Windows 11 Guide -->
+                <div class="glass-panel rounded-2xl p-6 border border-darkborder space-y-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold">
+                            🪟
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Windows 11 (DoH)</h3>
+                            <p class="text-xs text-slate-400">Native DNS-over-HTTPS</p>
+                        </div>
+                    </div>
+                    <ol class="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                        <li>Open <strong>Settings</strong> &rarr; <strong>Network & Internet</strong> &rarr; <strong>Wi-Fi</strong> (or Ethernet).</li>
+                        <li>Click <strong>Hardware properties</strong> &rarr; edit <strong>DNS server assignment</strong> to Manual.</li>
+                        <li>Set Preferred DNS IPv4 to: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">{{.PublicIPv4}}</code></li>
+                        <li>Select <strong>Encrypted only (DNS over HTTPS)</strong>.</li>
+                        <li>Enter DoH Template: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">https://{{.BaseDomain}}:8443/dns-query/&lt;token&gt;</code></li>
+                    </ol>
+                </div>
+
+                <!-- Smart TV / Apple TV / Router Guide -->
+                <div class="glass-panel rounded-2xl p-6 border border-darkborder space-y-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold">
+                            📺
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Smart TV / Apple TV / Router</h3>
+                            <p class="text-xs text-slate-400">DNS Proxy / Stubby / AdGuard Home</p>
+                        </div>
+                    </div>
+                    <ol class="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                        <li>On your home router or Apple TV, install or configure a DoT upstream client (e.g. Stubby, dnscrypt-proxy, or router native DoT).</li>
+                        <li>Set upstream server to: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">{{.PublicIPv4}}:853</code> with TLS hostname: <code class="code-font text-indigo-400 bg-darkbg px-2 py-0.5 rounded">&lt;token&gt;.{{.BaseDomain}}</code></li>
+                        <li>Now every device connected to your home Wi-Fi stream seamlessly!</li>
+                    </ol>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- MODAL: Create User -->
+    <div id="modal-create-user" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-bold text-white">Create Client Account</h3>
+                <button onclick="closeModal('modal-create-user')" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+
+            <form id="form-create-user" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Username / Label</label>
+                    <input type="text" id="create-username" required placeholder="e.g. john_living_room"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Custom Token (Leave blank to auto-generate)</label>
+                    <input type="text" id="create-token" placeholder="usr_8a91b2"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Max Concurrent Devices (IPs)</label>
+                    <input type="number" id="create-max-devices" min="1" max="100" value="2" required
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <p class="text-[11px] text-slate-500 mt-1">Number of distinct IPs permitted simultaneously in sliding 10m window.</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Subscription Period</label>
+                    <select id="create-duration" class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="never">Permanent / No Expiration</option>
+                        <option value="7d">7 Days Trial</option>
+                        <option value="30d" selected>30 Days (1 Month)</option>
+                        <option value="90d">90 Days (3 Months)</option>
+                        <option value="365d">365 Days (1 Year)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Notes (Optional)</label>
+                    <input type="text" id="create-notes" placeholder="e.g. Premium VIP plan"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('modal-create-user')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Create User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: Quick Setup / Endpoints Copy -->
+    <div id="modal-quick-setup" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-bold text-white">Client Setup Endpoints</h3>
+                    <p class="text-xs text-slate-400">User: <strong id="setup-modal-user" class="text-white"></strong></p>
+                </div>
+                <button onclick="closeModal('modal-quick-setup')" class="text-slate-400 hover:text-white text-xl">&times;</button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Android Private DNS -->
+                <div class="p-3.5 rounded-xl bg-darkbg border border-darkborder space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+                            🤖 Android Private DNS (DoT)
+                        </span>
+                        <button onclick="copyElementText('setup-android-endpoint')" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium">Copy</button>
+                    </div>
+                    <div id="setup-android-endpoint" class="code-font text-xs text-white bg-darkpanel p-2 rounded-lg break-all select-all"></div>
+                </div>
+
+                <!-- DoH Endpoint -->
+                <div class="p-3.5 rounded-xl bg-darkbg border border-darkborder space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-cyan-400 flex items-center gap-1.5">
+                            🌐 DNS-over-HTTPS (DoH) URL
+                        </span>
+                        <button onclick="copyElementText('setup-doh-endpoint')" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium">Copy</button>
+                    </div>
+                    <div id="setup-doh-endpoint" class="code-font text-xs text-white bg-darkpanel p-2 rounded-lg break-all select-all"></div>
+                </div>
+
+                <!-- iOS Profile Download -->
+                <div class="p-3.5 rounded-xl bg-darkbg border border-darkborder space-y-2">
+                    <span class="text-xs font-semibold text-indigo-400 flex items-center gap-1.5">
+                        🍏 Apple iOS / iPadOS / macOS Profile
+                    </span>
+                    <p class="text-xs text-slate-400">Download configuration profile to install system-wide encrypted DNS in one tap.</p>
+                    <div class="flex gap-2">
+                        <a id="setup-ios-dot-btn" href="#" download class="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold text-center transition">
+                            Download Profile (DoT)
+                        </a>
+                        <a id="setup-ios-doh-btn" href="#" download class="flex-1 py-2 rounded-lg bg-darkcard border border-darkborder hover:bg-darkhover text-slate-300 text-xs font-semibold text-center transition">
+                            Download (DoH)
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-2">
+                <button type="button" onclick="closeModal('modal-quick-setup')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-darkbg hover:text-white">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Add Domain Rule -->
+    <div id="modal-add-rule" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-bold text-white">Add Hijacking Rule</h3>
+                <button onclick="closeModal('modal-add-rule')" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+
+            <form id="form-add-rule" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Domain or Wildcard Pattern</label>
+                    <input type="text" id="rule-domain" required placeholder="e.g. *.netflix.com or hulu.com"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <p class="text-[11px] text-slate-500 mt-1">Supports exact matches and *.domain.com subdomains.</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Category / Platform</label>
+                    <input type="text" id="rule-category" placeholder="e.g. Netflix, Hulu, Custom" value="Custom"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('modal-add-rule')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Save Rule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: Change Admin Password -->
+    <div id="modal-change-password" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-bold text-white">Update Admin Password</h3>
+                <button onclick="closeModal('modal-change-password')" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+
+            <form id="form-change-password" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Current Password</label>
+                    <input type="password" id="pw-old" required
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">New Password (min 8 chars)</label>
+                    <input type="password" id="pw-new" minlength="8" required
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('modal-change-password')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Update Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Floating Notification Toast -->
+    <div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl bg-indigo-600 text-white text-xs font-semibold shadow-2xl transition-all duration-300 flex items-center gap-2">
+        <span id="toast-message">Notification</span>
+    </div>
+
+    <!-- Application Script Logic -->
+    <script>
+        let currentTab = 'users';
+        let serverBaseDomain = '{{.BaseDomain}}';
+        let serverIPv4 = '{{.PublicIPv4}}';
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            const msgEl = document.getElementById('toast-message');
+            msgEl.textContent = msg;
+            toast.className = `fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-white text-xs font-semibold shadow-2xl transition-all duration-300 flex items-center gap-2 ${isError ? 'bg-red-600' : 'bg-indigo-600'}`;
+            toast.classList.remove('hidden');
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+
+        function copyElementText(id) {
+            const text = document.getElementById(id).textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard!');
+            });
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('section[id^="tab-"]').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('border-indigo-500', 'text-indigo-400');
+                btn.classList.add('border-transparent', 'text-slate-400');
+            });
+            const activeBtn = document.getElementById(`tab-btn-${tab}`);
+            if (activeBtn) {
+                activeBtn.classList.add('border-indigo-500', 'text-indigo-400');
+                activeBtn.classList.remove('border-transparent', 'text-slate-400');
+            }
+
+            refreshCurrentTab();
+        }
+
+        function refreshCurrentTab() {
+            fetchStats();
+            if (currentTab === 'users') fetchUsers();
+            if (currentTab === 'devices') fetchAllDevices();
+            if (currentTab === 'rules') { fetchRules(); fetchPresets(); }
+            if (currentTab === 'logs') fetchLogs();
+        }
+
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/stats');
+                if (!res.ok) return;
+                const d = await res.json();
+                document.getElementById('stat-total-queries').textContent = d.total_queries.toLocaleString();
+                document.getElementById('stat-active-users').textContent = d.active_users.toLocaleString();
+                document.getElementById('stat-total-users').textContent = d.total_users.toLocaleString();
+                document.getElementById('stat-active-devices').textContent = d.active_devices.toLocaleString();
+                document.getElementById('stat-total-rules').textContent = d.total_rules.toLocaleString();
+                document.getElementById('stat-forwarded-queries').textContent = d.forwarded_queries.toLocaleString();
+                document.getElementById('stat-refused-queries').textContent = d.refused_queries.toLocaleString();
+
+                const pct = d.total_queries > 0 ? Math.round((d.hijacked_queries / d.total_queries) * 100) : 0;
+                document.getElementById('stat-hijacked-pct').textContent = `${pct}%`;
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function fetchUsers() {
+            try {
+                const res = await fetch('/api/users');
+                if (!res.ok) return;
+                const users = await res.json();
+                const tbody = document.getElementById('users-table-body');
+                tbody.innerHTML = '';
+
+                if (!users || users.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-500">No users found. Click "Add New User" to create one.</td></tr>`;
+                    return;
+                }
+
+                users.forEach(u => {
+                    const isExpired = u.expires_at > 0 && u.expires_at < (Date.now() / 1000);
+                    const statusBadge = isExpired
+                        ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">Expired</span>`
+                        : (u.status === 'active'
+                            ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Active</span>`
+                            : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20">Disabled</span>`);
+
+                    const expiryText = u.expires_at === 0 ? 'Never' : new Date(u.expires_at * 1000).toLocaleDateString();
+
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-darkpanel/50 transition';
+                    tr.innerHTML = `
+                        <td class="py-3.5 px-4">
+                            <div class="font-semibold text-white">${escapeHtml(u.username)}</div>
+                            <div class="text-xs text-indigo-400 code-font flex items-center gap-1.5 mt-0.5">
+                                <span>${escapeHtml(u.token)}</span>
+                                <button onclick="navigator.clipboard.writeText('${escapeHtml(u.token)}'); showToast('Token copied!');" class="text-slate-500 hover:text-slate-300" title="Copy Token">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                </button>
+                            </div>
+                        </td>
+                        <td class="py-3.5 px-4">${statusBadge}</td>
+                        <td class="py-3.5 px-4">
+                            <span class="font-semibold ${u.active_devices >= u.max_devices ? 'text-amber-400' : 'text-emerald-400'}">${u.active_devices || 0}</span>
+                            <span class="text-slate-500">/ ${u.max_devices} IPs</span>
+                        </td>
+                        <td class="py-3.5 px-4 text-slate-300 text-xs">${expiryText}</td>
+                        <td class="py-3.5 px-4">
+                            <button onclick="openQuickSetup('${escapeHtml(u.token)}', '${escapeHtml(u.username)}')" class="px-2.5 py-1 text-xs rounded-lg bg-darkcard border border-darkborder hover:bg-darkhover text-indigo-400 font-medium">
+                                View Setup
+                            </button>
+                        </td>
+                        <td class="py-3.5 px-4 text-right space-x-1">
+                            <button onclick="killSessions('${escapeHtml(u.token)}')" class="p-1.5 text-slate-400 hover:text-amber-400 rounded hover:bg-darkcard" title="Kill Active Sessions">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                            </button>
+                            <button onclick="deleteUser('${escapeHtml(u.token)}')" class="p-1.5 text-slate-400 hover:text-red-400 rounded hover:bg-darkcard" title="Delete User">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function fetchAllDevices() {
+            try {
+                const res = await fetch('/api/users');
+                if (!res.ok) return;
+                const users = await res.json();
+                const tbody = document.getElementById('devices-table-body');
+                tbody.innerHTML = '';
+
+                let hasAny = false;
+                for (const u of users) {
+                    const devRes = await fetch(`/api/users/${u.token}/devices`);
+                    if (devRes.ok) {
+                        const devices = await devRes.json();
+                        if (devices && devices.length > 0) {
+                            hasAny = true;
+                            devices.forEach(d => {
+                                const tr = document.createElement('tr');
+                                tr.className = 'hover:bg-darkpanel/50 transition';
+                                const mins = Math.floor(d.remaining_sec / 60);
+                                const secs = d.remaining_sec % 60;
+                                tr.innerHTML = `
+                                    <td class="py-3.5 px-4 font-semibold text-white code-font">${escapeHtml(d.ip)}</td>
+                                    <td class="py-3.5 px-4 text-slate-300">${escapeHtml(u.username)} <span class="text-xs text-slate-500">(${escapeHtml(u.token)})</span></td>
+                                    <td class="py-3.5 px-4 text-slate-400 text-xs">${d.seconds_ago}s ago</td>
+                                    <td class="py-3.5 px-4 text-emerald-400 text-xs font-medium">${mins}m ${secs}s remaining</td>
+                                    <td class="py-3.5 px-4 text-right">
+                                        <button onclick="killSessions('${escapeHtml(u.token)}')" class="px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-semibold">
+                                            Kill Session
+                                        </button>
+                                    </td>
+                                `;
+                                tbody.appendChild(tr);
+                            });
+                        }
+                    }
+                }
+
+                if (!hasAny) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-slate-500">No active device sessions in the current 10-minute sliding window.</td></tr>`;
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function fetchPresets() {
+            try {
+                const res = await fetch('/api/presets');
+                if (!res.ok) return;
+                const presets = await res.json();
+                const grid = document.getElementById('presets-grid');
+                grid.innerHTML = '';
+
+                presets.forEach(p => {
+                    const card = document.createElement('div');
+                    card.className = 'glass-panel rounded-2xl p-4 border border-darkborder flex flex-col justify-between space-y-3';
+                    card.innerHTML = `
+                        <div>
+                            <div class="font-bold text-white text-sm">${escapeHtml(p.name)}</div>
+                            <div class="text-[11px] text-slate-400 mt-0.5">${escapeHtml(p.description)}</div>
+                            <div class="mt-2 text-[10px] code-font text-indigo-300/80 bg-darkbg p-1.5 rounded-lg line-clamp-2">
+                                ${p.domains.slice(0, 3).join(', ')}${p.domains.length > 3 ? '...' : ''}
+                            </div>
+                        </div>
+                        <button onclick="applyPreset('${escapeHtml(p.id)}')" class="w-full py-2 rounded-xl bg-darkcard border border-darkborder hover:bg-indigo-600 hover:text-white text-indigo-400 text-xs font-semibold transition">
+                            1-Click Enable Preset (${p.domains.length} rules)
+                        </button>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function applyPreset(id) {
+            try {
+                const res = await fetch(`/api/presets/${id}/apply`, { method: 'POST' });
+                const d = await res.json();
+                if (res.ok) {
+                    showToast(`Preset enabled: ${d.preset} (${d.count} domains)`);
+                    fetchRules();
+                    fetchStats();
+                } else {
+                    showToast(d.error || 'Failed to apply preset', true);
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        async function fetchRules() {
+            try {
+                const res = await fetch('/api/rules');
+                if (!res.ok) return;
+                const rules = await res.json();
+                const tbody = document.getElementById('rules-table-body');
+                tbody.innerHTML = '';
+
+                if (!rules || rules.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-slate-500">No active hijack rules. Click a preset above or "Add Custom Domain".</td></tr>`;
+                    return;
+                }
+
+                rules.forEach(r => {
+                    const statusBadge = r.enabled
+                        ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Spoofing Active</span>`
+                        : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20">Disabled</span>`;
+
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-darkpanel/50 transition';
+                    tr.innerHTML = `
+                        <td class="py-3 px-4 font-semibold text-white code-font">${escapeHtml(r.domain)}</td>
+                        <td class="py-3 px-4 text-slate-400 text-xs">${escapeHtml(r.category || 'General')}</td>
+                        <td class="py-3 px-4">${statusBadge}</td>
+                        <td class="py-3 px-4 text-right space-x-1">
+                            <button onclick="toggleRule('${escapeHtml(r.domain)}')" class="px-2 py-1 rounded text-xs bg-darkcard text-slate-300 hover:text-white">Toggle</button>
+                            <button onclick="deleteRule('${escapeHtml(r.domain)}')" class="px-2 py-1 rounded text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function fetchLogs() {
+            try {
+                const res = await fetch('/api/logs?limit=50');
+                if (!res.ok) return;
+                const logs = await res.json();
+                const tbody = document.getElementById('logs-table-body');
+                tbody.innerHTML = '';
+
+                if (!logs || logs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500 font-sans">No DNS queries recorded yet.</td></tr>`;
+                    return;
+                }
+
+                logs.forEach(l => {
+                    let actionBadge = '';
+                    if (l.action === 'HIJACKED') {
+                        actionBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-sans">HIJACKED</span>`;
+                    } else if (l.action === 'FORWARDED') {
+                        actionBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-sans">FORWARDED</span>`;
+                    } else if (l.action === 'REFUSED_LIMIT') {
+                        actionBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 font-sans">LIMIT EXCEEDED</span>`;
+                    } else {
+                        actionBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 font-sans">REFUSED AUTH</span>`;
+                    }
+
+                    const timeStr = new Date(l.timestamp * 1000).toLocaleTimeString();
+
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-darkpanel/50 transition';
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-4 text-slate-400">${timeStr}</td>
+                        <td class="py-2.5 px-4 text-indigo-400 font-semibold">${escapeHtml(l.username || l.token)}</td>
+                        <td class="py-2.5 px-4 text-slate-300">${escapeHtml(l.client_ip)}</td>
+                        <td class="py-2.5 px-4 text-white font-medium">${escapeHtml(l.domain)}</td>
+                        <td class="py-2.5 px-4 text-slate-400">${escapeHtml(l.qtype)}</td>
+                        <td class="py-2.5 px-4 text-slate-400">${escapeHtml(l.protocol)}</td>
+                        <td class="py-2.5 px-4 text-right">${actionBadge}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function openQuickSetup(token, username) {
+            document.getElementById('setup-modal-user').textContent = username;
+            document.getElementById('setup-android-endpoint').textContent = `${token}.${serverBaseDomain}`;
+            document.getElementById('setup-doh-endpoint').textContent = `https://${serverBaseDomain}:8443/dns-query/${token}`;
+
+            document.getElementById('setup-ios-dot-btn').href = `/api/user/${token}/mobileconfig?protocol=dot`;
+            document.getElementById('setup-ios-doh-btn').href = `/api/user/${token}/mobileconfig?protocol=doh`;
+
+            document.getElementById('modal-quick-setup').classList.remove('hidden');
+        }
+
+        async function killSessions(token) {
+            if (!confirm('Are you sure you want to disconnect all active device sessions for this user?')) return;
+            try {
+                const res = await fetch(`/api/users/${token}/kill-sessions`, { method: 'POST' });
+                if (res.ok) {
+                    showToast('Device sessions killed successfully!');
+                    refreshCurrentTab();
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        async function deleteUser(token) {
+            if (!confirm(`Are you sure you want to delete user ${token}?`)) return;
+            try {
+                const res = await fetch(`/api/users/${token}`, { method: 'DELETE' });
+                if (res.ok) {
+                    showToast('User deleted!');
+                    fetchUsers();
+                    fetchStats();
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        async function deleteRule(domain) {
+            if (!confirm(`Delete rule ${domain}?`)) return;
+            try {
+                const res = await fetch(`/api/rules/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+                if (res.ok) {
+                    showToast('Rule deleted!');
+                    fetchRules();
+                    fetchStats();
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        async function toggleRule(domain) {
+            try {
+                const res = await fetch(`/api/rules/${encodeURIComponent(domain)}/toggle`, { method: 'POST' });
+                if (res.ok) {
+                    showToast('Rule status updated!');
+                    fetchRules();
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        // Modals management
+        function openCreateUserModal() {
+            document.getElementById('modal-create-user').classList.remove('hidden');
+        }
+        function openAddRuleModal() {
+            document.getElementById('modal-add-rule').classList.remove('hidden');
+        }
+        function openChangePasswordModal() {
+            document.getElementById('modal-change-password').classList.remove('hidden');
+        }
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+
+        // Form: Create User
+        document.getElementById('form-create-user').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('create-username').value.trim();
+            const token = document.getElementById('create-token').value.trim();
+            const max_devices = parseInt(document.getElementById('create-max-devices').value, 10);
+            const duration = document.getElementById('create-duration').value;
+            const notes = document.getElementById('create-notes').value.trim();
+
+            let expires_at = 0;
+            const now = Math.floor(Date.now() / 1000);
+            if (duration === '7d') expires_at = now + (7 * 86400);
+            if (duration === '30d') expires_at = now + (30 * 86400);
+            if (duration === '90d') expires_at = now + (90 * 86400);
+            if (duration === '365d') expires_at = now + (365 * 86400);
+
+            try {
+                const res = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, token, max_devices, expires_at, notes, status: 'active' })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    closeModal('modal-create-user');
+                    document.getElementById('form-create-user').reset();
+                    showToast(`User created: ${data.username}`);
+                    fetchUsers();
+                    fetchStats();
+                    // Open Quick Setup for immediate access
+                    openQuickSetup(data.token, data.username);
+                } else {
+                    showToast(data.error || 'Failed to create user', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        });
+
+        // Form: Add Rule
+        document.getElementById('form-add-rule').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const domain = document.getElementById('rule-domain').value.trim();
+            const category = document.getElementById('rule-category').value.trim();
+
+            try {
+                const res = await fetch('/api/rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domain, category })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    closeModal('modal-add-rule');
+                    document.getElementById('form-add-rule').reset();
+                    showToast(`Rule added for: ${data.domain}`);
+                    fetchRules();
+                    fetchStats();
+                } else {
+                    showToast(data.error || 'Failed to add rule', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        });
+
+        // Form: Change Password
+        document.getElementById('form-change-password').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const old_password = document.getElementById('pw-old').value;
+            const new_password = document.getElementById('pw-new').value;
+
+            try {
+                const res = await fetch('/api/admin/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ old_password, new_password })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    closeModal('modal-change-password');
+                    document.getElementById('form-change-password').reset();
+                    showToast('Admin password changed successfully!');
+                } else {
+                    showToast(data.error || 'Failed to update password', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        });
+
+        async function handleLogout() {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login';
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // Initialize and start background periodic pollers
+        refreshCurrentTab();
+
+        setInterval(() => {
+            fetchStats();
+            const autoRef = document.getElementById('auto-refresh-toggle');
+            if (currentTab === 'devices' && autoRef && autoRef.checked) {
+                fetchAllDevices();
+            }
+            if (currentTab === 'logs') {
+                fetchLogs();
+            }
+        }, 3000);
+    </script>
+</body>
+</html>
