@@ -113,6 +113,13 @@ cd /opt/gravity-dns
 sudo bash install.sh
 ```
 
+### 🔄 In-Place Upgrades & Reinstallation
+To update an existing installation to the latest version of GravityDNS, simply re-run the one-liner installer at any time:
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/magicrana/gravity-dns/main/install.sh)
+```
+The installer automatically detects your existing installation and **updates everything** (Go engine binaries, web control panel templates, kernel configs, systemd services) **while strictly preserving your last installed admin password, base domain, TLS certificates, and settings**. A backup of your previous configuration is also automatically preserved at `/etc/gravity/gravity.yaml.bak`.
+
 The script will automatically:
 1. Detect your public IP and prompt for base domain and admin password.
 2. Install `redis-server`, build tools, and modern Go compiler.

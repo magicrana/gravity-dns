@@ -136,8 +136,15 @@ func (h *APIHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.AuthenticateAdmin(r.Context(), req.Username, req.Password); err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid username or password")
-		return
+		// Self-healing fallback: If Redis hash didn't match (e.g. out of sync after manual config edit or reinstall),
+		// check against the configured master admin credentials in gravity.yaml and resync Redis if valid.
+		if h.cfg.Panel.AdminUsername != "" && req.Username == h.cfg.Panel.AdminUsername &&
+			h.cfg.Panel.AdminPassword != "" && req.Password == h.cfg.Panel.AdminPassword {
+			_ = h.store.ResetAdminPassword(r.Context(), req.Username, req.Password)
+		} else {
+			writeError(w, http.StatusUnauthorized, "invalid username or password")
+			return
+		}
 	}
 
 	tokenStr, err := GenerateJWT(h.cfg.Panel.JWTSecret, req.Username, h.cfg.Panel.SessionTTL)

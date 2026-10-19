@@ -630,6 +630,20 @@ func (s *Store) UpdateAdminPassword(ctx context.Context, username, newPassword s
 	return s.client.HSet(ctx, adminKey, "password_hash", string(hash)).Err()
 }
 
+// ResetAdminPassword forcibly initializes or updates admin credentials in Redis.
+func (s *Store) ResetAdminPassword(ctx context.Context, username, password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	adminKey := fmt.Sprintf("admin:user:%s", username)
+	return s.client.HSet(ctx, adminKey, map[string]interface{}{
+		"username":      username,
+		"password_hash": string(hash),
+		"updated_at":    time.Now().Unix(),
+	}).Err()
+}
+
 // UpdateAdminProfile changes admin username, password, or both after verifying old credentials.
 func (s *Store) UpdateAdminProfile(ctx context.Context, oldUsername, newUsername, oldPassword, newPassword string) error {
 	if err := s.AuthenticateAdmin(ctx, oldUsername, oldPassword); err != nil {

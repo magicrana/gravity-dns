@@ -69,35 +69,136 @@ prompt_input() {
     fi
 }
 
-echo -e "${BOLD}=== Step 1: Network & Configuration Parameters ===${NC}"
+# ==================== STEP 1: CONFIGURATION & CREDENTIAL DETECTION ====================
+CONFIG_PATH="/etc/gravity/gravity.yaml"
+IS_REINSTALL=false
 
-# Auto-detect Public IPv4
+read_yaml_value() {
+    local file="$1"
+    local key="$2"
+    if [ ! -f "$file" ]; then
+        return
+    fi
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import re, sys
+try:
+    with open('$file', 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            m = re.match(r'^\s*'+re.escape('$key')+r':\s*(.*)', line)
+            if m:
+                val = m.group(1).split('#')[0].strip()
+                if (val.startswith('\"') and val.endswith('\"')) or (val.startswith('\'') and val.endswith('\'')):
+                    val = val[1:-1]
+                print(val)
+                sys.exit(0)
+except Exception:
+    pass
+" 2>/dev/null && return
+    fi
+    # Fallback POSIX regex parser
+    grep -E "^[[:space:]]*${key}:" "$file" 2>/dev/null | head -n1 | sed -E "s/^[[:space:]]*${key}:[[:space:]]*//; s/[[:space:]]*#.*$//; s/^[\"']//; s/[\"']$//"
+}
+
+# Auto-detect Public IPv4 from external services or default gateway
 DETECTED_IP=$(curl -s4 --max-time 4 https://ifconfig.me || curl -s4 --max-time 4 https://api.ipify.org || ip route get 1.1.1.1 2>/dev/null | awk '{print $7}' | head -n1 || echo "127.0.0.1")
 
-# 1. Base Domain
-DOMAIN_DEFAULT="${GRAVITY_DOMAIN:-dns.example.com}"
-prompt_input "Enter Base Domain for SmartDNS (e.g. dns.mydomain.com): [${DOMAIN_DEFAULT}] " INPUT_DOMAIN "$DOMAIN_DEFAULT"
-DOMAIN="${INPUT_DOMAIN:-$DOMAIN_DEFAULT}"
-# Normalize domain (strip leading/trailing dots)
-DOMAIN=$(echo "$DOMAIN" | sed 's/^\.*//; s/\.*$//')
+PREV_DOMAIN=""
+PREV_IP=""
+PREV_ADMIN_USER=""
+PREV_ADMIN_PASS=""
+PREV_JWT_SECRET=""
+PREV_REDIS_PASS=""
+PREV_REDIS_ADDR=""
+PREV_TLS_CERT=""
+PREV_TLS_KEY=""
 
-# 2. Public IPv4
-IP_DEFAULT="${GRAVITY_PUBLIC_IPV4:-$DETECTED_IP}"
-prompt_input "Enter Public VPS IPv4 for DNS Spoofing: [${IP_DEFAULT}] " INPUT_IP "$IP_DEFAULT"
-PUBLIC_IP="${INPUT_IP:-$IP_DEFAULT}"
+if [ -f "$CONFIG_PATH" ]; then
+    PREV_DOMAIN=$(read_yaml_value "$CONFIG_PATH" "domain")
+    PREV_IP=$(read_yaml_value "$CONFIG_PATH" "public_ipv4")
+    PREV_ADMIN_USER=$(read_yaml_value "$CONFIG_PATH" "admin_username")
+    PREV_ADMIN_PASS=$(read_yaml_value "$CONFIG_PATH" "admin_password")
+    PREV_JWT_SECRET=$(read_yaml_value "$CONFIG_PATH" "jwt_secret")
+    PREV_REDIS_PASS=$(read_yaml_value "$CONFIG_PATH" "password")
+    PREV_REDIS_ADDR=$(read_yaml_value "$CONFIG_PATH" "addr")
+    PREV_TLS_CERT=$(read_yaml_value "$CONFIG_PATH" "tls_cert_file")
+    PREV_TLS_KEY=$(read_yaml_value "$CONFIG_PATH" "tls_key_file")
 
-# 3. Admin Password
-AUTO_PW=$(openssl rand -hex 6 2>/dev/null || tr -dc A-Za-z0-9 </dev/urandom | head -c 12 || echo "admin123456")
-PW_DEFAULT="${GRAVITY_ADMIN_PASS:-$AUTO_PW}"
-prompt_input "Set Web Management Panel Admin Password: [${PW_DEFAULT}] " INPUT_PW "$PW_DEFAULT"
-ADMIN_PASS="${INPUT_PW:-$PW_DEFAULT}"
+    if [ -n "$PREV_ADMIN_PASS" ] || [ -n "$PREV_DOMAIN" ]; then
+        IS_REINSTALL=true
+    fi
+fi
+
+if [ "$IS_REINSTALL" = "true" ]; then
+    echo -e "${GREEN}${BOLD}=== Existing Installation Detected (/etc/gravity/gravity.yaml) ===${NC}"
+    echo -e "${CYAN}Reinstall mode: All platform engines, binaries, web UI templates, and${NC}"
+    echo -e "${CYAN}system services will be upgraded to the latest version.${NC}"
+    echo -e "${GREEN}${BOLD}>> Preserving previous admin password and credentials. <<${NC}\n"
+
+    # 1. Base Domain
+    DOMAIN_DEFAULT="${GRAVITY_DOMAIN:-${PREV_DOMAIN:-dns.example.com}}"
+    prompt_input "Enter Base Domain for SmartDNS: [${DOMAIN_DEFAULT}] " INPUT_DOMAIN "$DOMAIN_DEFAULT"
+    DOMAIN="${INPUT_DOMAIN:-$DOMAIN_DEFAULT}"
+    DOMAIN=$(echo "$DOMAIN" | sed 's/^\.*//; s/\.*$//')
+
+    # 2. Public IPv4
+    IP_DEFAULT="${GRAVITY_PUBLIC_IPV4:-${PREV_IP:-$DETECTED_IP}}"
+    prompt_input "Enter Public VPS IPv4 for DNS Spoofing: [${IP_DEFAULT}] " INPUT_IP "$IP_DEFAULT"
+    PUBLIC_IP="${INPUT_IP:-$IP_DEFAULT}"
+
+    # 3. Credentials & Keys: strictly retain existing password
+    ADMIN_USER="${PREV_ADMIN_USER:-admin}"
+    if [ -n "${GRAVITY_ADMIN_PASS:-}" ]; then
+        ADMIN_PASS="${GRAVITY_ADMIN_PASS}"
+        echo -e "  Admin Password: ${BOLD}${ADMIN_PASS}${NC} (from GRAVITY_ADMIN_PASS override)"
+    else
+        ADMIN_PASS="${PREV_ADMIN_PASS}"
+        echo -e "  Admin Password: ${GREEN}${BOLD}[Preserved from last installation: ${ADMIN_PASS}]${NC}"
+    fi
+
+    JWT_SECRET="${PREV_JWT_SECRET:-$(openssl rand -hex 24 2>/dev/null || echo "gravity_secret_jwt_random_key_123456789")}"
+    REDIS_PASS="${PREV_REDIS_PASS:-}"
+    REDIS_ADDR="${PREV_REDIS_ADDR:-127.0.0.1:6379}"
+    TLS_CERT="${PREV_TLS_CERT:-/etc/letsencrypt/live/${DOMAIN}/fullchain.pem}"
+    TLS_KEY="${PREV_TLS_KEY:-/etc/letsencrypt/live/${DOMAIN}/privkey.pem}"
+else
+    echo -e "${BOLD}=== Step 1: Network & Configuration Parameters ===${NC}"
+
+    # 1. Base Domain
+    DOMAIN_DEFAULT="${GRAVITY_DOMAIN:-dns.example.com}"
+    prompt_input "Enter Base Domain for SmartDNS (e.g. dns.mydomain.com): [${DOMAIN_DEFAULT}] " INPUT_DOMAIN "$DOMAIN_DEFAULT"
+    DOMAIN="${INPUT_DOMAIN:-$DOMAIN_DEFAULT}"
+    DOMAIN=$(echo "$DOMAIN" | sed 's/^\.*//; s/\.*$//')
+
+    # 2. Public IPv4
+    IP_DEFAULT="${GRAVITY_PUBLIC_IPV4:-$DETECTED_IP}"
+    prompt_input "Enter Public VPS IPv4 for DNS Spoofing: [${IP_DEFAULT}] " INPUT_IP "$IP_DEFAULT"
+    PUBLIC_IP="${INPUT_IP:-$IP_DEFAULT}"
+
+    # 3. Admin Password (generated or user prompt)
+    ADMIN_USER="admin"
+    AUTO_PW=$(openssl rand -hex 6 2>/dev/null || tr -dc A-Za-z0-9 </dev/urandom | head -c 12 || echo "admin123456")
+    PW_DEFAULT="${GRAVITY_ADMIN_PASS:-$AUTO_PW}"
+    prompt_input "Set Web Management Panel Admin Password: [${PW_DEFAULT}] " INPUT_PW "$PW_DEFAULT"
+    ADMIN_PASS="${INPUT_PW:-$PW_DEFAULT}"
+
+    JWT_SECRET=$(openssl rand -hex 24 2>/dev/null || echo "gravity_secret_jwt_random_key_123456789")
+    REDIS_PASS=""
+    REDIS_ADDR="127.0.0.1:6379"
+    TLS_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+    TLS_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+fi
 
 echo ""
 echo -e "${CYAN}Configuration Profile:${NC}"
-echo -e "  Base Domain: ${BOLD}${DOMAIN}${NC} (Wildcard: *.${DOMAIN})"
-echo -e "  Public IPv4: ${BOLD}${PUBLIC_IP}${NC}"
-echo -e "  Admin User:  ${BOLD}admin${NC}"
-echo -e "  Admin Pass:  ${BOLD}${ADMIN_PASS}${NC}"
+echo -e "  Base Domain:    ${BOLD}${DOMAIN}${NC} (Wildcard: *.${DOMAIN})"
+echo -e "  Public IPv4:    ${BOLD}${PUBLIC_IP}${NC}"
+echo -e "  Admin User:     ${BOLD}${ADMIN_USER}${NC}"
+if [ "$IS_REINSTALL" = "true" ]; then
+    echo -e "  Admin Password: ${GREEN}${BOLD}${ADMIN_PASS} (Preserved from last installation)${NC}"
+else
+    echo -e "  Admin Password: ${BOLD}${ADMIN_PASS}${NC}"
+fi
 echo ""
 
 if [ "${GRAVITY_NON_INTERACTIVE:-false}" != "true" ] && [ "$has_tty" = "true" ]; then
@@ -195,12 +296,15 @@ mkdir -p /etc/gravity
 mkdir -p /var/log/gravity
 mkdir -p /var/lib/gravity
 
+# Backup existing config if present
+if [ -f /etc/gravity/gravity.yaml ]; then
+    cp /etc/gravity/gravity.yaml /etc/gravity/gravity.yaml.bak
+    echo -e "${CYAN}Previous configuration backed up to /etc/gravity/gravity.yaml.bak${NC}"
+fi
+
 # Copy web templates and static assets
 rm -rf /var/lib/gravity/web
 cp -r "${SOURCE_DIR}/web" /var/lib/gravity/
-
-# Generate /etc/gravity/gravity.yaml if not already present or update
-JWT_SECRET=$(openssl rand -hex 24 2>/dev/null || echo "gravity_secret_jwt_random_key_123456789")
 
 cat > /etc/gravity/gravity.yaml << EOF
 # GravityDNS Master Configuration
@@ -213,8 +317,8 @@ dns:
   enabled: true
   dot_listen: "0.0.0.0:853"
   doh_listen: "0.0.0.0:8443"
-  tls_cert_file: "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
-  tls_key_file: "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+  tls_cert_file: "${TLS_CERT}"
+  tls_key_file: "${TLS_KEY}"
   upstream_dns:
     - "1.1.1.1:53"
     - "8.8.8.8:53"
@@ -232,21 +336,21 @@ sniproxy:
   enforce_rules: true
 
 redis:
-  addr: "127.0.0.1:6379"
-  password: ""
+  addr: "${REDIS_ADDR}"
+  password: "${REDIS_PASS}"
   db: 0
 
 panel:
   enabled: true
   listen: "0.0.0.0:8080"
   jwt_secret: "${JWT_SECRET}"
-  admin_username: "admin"
+  admin_username: "${ADMIN_USER:-admin}"
   admin_password: "${ADMIN_PASS}"
   session_ttl: 24
 EOF
 
 chmod 600 /etc/gravity/gravity.yaml
-echo -e "${GREEN}Configuration saved to /etc/gravity/gravity.yaml${NC}"
+echo -e "${GREEN}Configuration updated and saved to /etc/gravity/gravity.yaml${NC}"
 
 echo -e "\n${BOLD}=== Step 7: Systemd Service Installation ===${NC}"
 cat > /etc/systemd/system/gravity.service << EOF
@@ -316,21 +420,45 @@ if [ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
     echo -e "  ${BOLD}certbot certonly --dns-cloudflare --dns-cloudflare-credentials /root/.cloudflare.ini -d \"${DOMAIN}\" -d \"*.${DOMAIN}\"${NC}"
 fi
 
-echo -e "\n${GREEN}${BOLD}========================================================================${NC}"
-echo -e "${GREEN}${BOLD}          GravityDNS Deployment Completed Successfully!                 ${NC}"
-echo -e "${GREEN}${BOLD}========================================================================${NC}"
-echo -e "  Admin Control Panel:  ${BOLD}http://${PUBLIC_IP}:8080${NC} (or http://${DOMAIN}:8080)"
-echo -e "  Default Admin User:   ${BOLD}admin${NC}"
-echo -e "  Admin Password:       ${BOLD}${ADMIN_PASS}${NC}"
-echo -e ""
-echo -e "  Protocols & Ports:"
-echo -e "    - DoT (DNS-over-TLS):   ${BOLD}0.0.0.0:853${NC}   (<token>.${DOMAIN})"
-echo -e "    - DoH (DNS-over-HTTPS): ${BOLD}0.0.0.0:8443${NC}  (https://${DOMAIN}:8443/dns-query/<token>)"
-echo -e "    - SNI Proxy Router:     ${BOLD}0.0.0.0:443${NC}   (TCP Zero-Copy Splice)"
-echo -e ""
-echo -e "  Service Management:"
-echo -e "    - Status:   ${BOLD}systemctl status gravity.service${NC}"
-echo -e "    - Logs:     ${BOLD}journalctl -u gravity.service -f${NC}"
-echo -e "    - Restart:  ${BOLD}systemctl restart gravity.service${NC}"
-echo -e "    - Config:   ${BOLD}/etc/gravity/gravity.yaml${NC}"
-echo -e "${GREEN}${BOLD}========================================================================${NC}\n"
+if [ "$IS_REINSTALL" = "true" ]; then
+    echo -e "\n${GREEN}${BOLD}========================================================================${NC}"
+    echo -e "${GREEN}${BOLD}       GravityDNS Platform Reinstalled & Updated Successfully!          ${NC}"
+    echo -e "${GREEN}${BOLD}========================================================================${NC}"
+    echo -e "  Admin Control Panel:  ${BOLD}http://${PUBLIC_IP}:8080${NC} (or http://${DOMAIN}:8080)"
+    echo -e "  Admin Username:       ${BOLD}${ADMIN_USER:-admin}${NC}"
+    echo -e "  Admin Password:       ${BOLD}${ADMIN_PASS}${NC} ${GREEN}(Preserved from last installation)${NC}"
+    echo -e ""
+    echo -e "  Upgraded Components:"
+    echo -e "    - Pure Go DNS Engine (:853, :8443)  -> Recompiled & Updated"
+    echo -e "    - Pure Go SNI Router (:443)         -> Recompiled & Updated"
+    echo -e "    - Web Admin Management Panel        -> Recompiled & Updated"
+    echo -e "    - Web UI & Left Sidebar Templates   -> Updated in /var/lib/gravity/web"
+    echo -e "    - Kernel Sysctl & Firewall Rules    -> Verified & Synchronized"
+    echo -e "    - Admin Credentials                 -> ${GREEN}Preserved Unchanged${NC}"
+    echo -e ""
+    echo -e "  Service Management:"
+    echo -e "    - Status:   ${BOLD}systemctl status gravity.service${NC}"
+    echo -e "    - Logs:     ${BOLD}journalctl -u gravity.service -f${NC}"
+    echo -e "    - Restart:  ${BOLD}systemctl restart gravity.service${NC}"
+    echo -e "    - Config:   ${BOLD}/etc/gravity/gravity.yaml${NC}"
+    echo -e "${GREEN}${BOLD}========================================================================${NC}\n"
+else
+    echo -e "\n${GREEN}${BOLD}========================================================================${NC}"
+    echo -e "${GREEN}${BOLD}          GravityDNS Deployment Completed Successfully!                 ${NC}"
+    echo -e "${GREEN}${BOLD}========================================================================${NC}"
+    echo -e "  Admin Control Panel:  ${BOLD}http://${PUBLIC_IP}:8080${NC} (or http://${DOMAIN}:8080)"
+    echo -e "  Default Admin User:   ${BOLD}admin${NC}"
+    echo -e "  Admin Password:       ${BOLD}${ADMIN_PASS}${NC}"
+    echo -e ""
+    echo -e "  Protocols & Ports:"
+    echo -e "    - DoT (DNS-over-TLS):   ${BOLD}0.0.0.0:853${NC}   (<token>.${DOMAIN})"
+    echo -e "    - DoH (DNS-over-HTTPS): ${BOLD}0.0.0.0:8443${NC}  (https://${DOMAIN}:8443/dns-query/<token>)"
+    echo -e "    - SNI Proxy Router:     ${BOLD}0.0.0.0:443${NC}   (TCP Zero-Copy Splice)"
+    echo -e ""
+    echo -e "  Service Management:"
+    echo -e "    - Status:   ${BOLD}systemctl status gravity.service${NC}"
+    echo -e "    - Logs:     ${BOLD}journalctl -u gravity.service -f${NC}"
+    echo -e "    - Restart:  ${BOLD}systemctl restart gravity.service${NC}"
+    echo -e "    - Config:   ${BOLD}/etc/gravity/gravity.yaml${NC}"
+    echo -e "${GREEN}${BOLD}========================================================================${NC}\n"
+fi
