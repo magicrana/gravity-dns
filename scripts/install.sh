@@ -444,8 +444,8 @@ chmod +x /etc/letsencrypt/renewal-hooks/deploy/gravitydns.sh
 
 # Setup helper scripts in /opt/gravity-dns/scripts
 mkdir -p /opt/gravity-dns/scripts
-if [ -d "${SOURCE_DIR}/scripts" ]; then
-    cp -f "${SOURCE_DIR}"/scripts/*.sh /opt/gravity-dns/scripts/ 2>/dev/null || true
+if [ -d "${SOURCE_DIR:-/opt/gravity-dns}/scripts" ]; then
+    cp -f "${SOURCE_DIR:-/opt/gravity-dns}"/scripts/*.sh /opt/gravity-dns/scripts/ 2>/dev/null || true
 fi
 chmod +x /opt/gravity-dns/scripts/*.sh 2>/dev/null || true
 

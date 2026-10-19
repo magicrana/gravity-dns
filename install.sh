@@ -9,19 +9,21 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+CACHE_BUSTER="$(date +%s)"
+
 # Route uninstallation request
 if [ "${1:-}" = "uninstall" ] || [ "${1:-}" = "--uninstall" ]; then
     shift
     if [ -f "${SCRIPT_DIR}/scripts/uninstall.sh" ]; then
         exec bash "${SCRIPT_DIR}/scripts/uninstall.sh" "$@"
     else
-        exec bash <(curl -fsSL "https://raw.githubusercontent.com/magicrana/gravity-dns/main/scripts/uninstall.sh") "$@"
+        exec bash <(curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "https://raw.githubusercontent.com/magicrana/gravity-dns/main/scripts/uninstall.sh?t=${CACHE_BUSTER}") "$@"
     fi
 fi
 
 if [ -f "${SCRIPT_DIR}/scripts/install.sh" ]; then
     exec bash "${SCRIPT_DIR}/scripts/install.sh" "$@"
 else
-    # Piped execution: download and execute scripts/install.sh directly
-    exec bash <(curl -fsSL "https://raw.githubusercontent.com/magicrana/gravity-dns/main/scripts/install.sh") "$@"
+    # Piped execution: download and execute scripts/install.sh directly with cache-busting
+    exec bash <(curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "https://raw.githubusercontent.com/magicrana/gravity-dns/main/scripts/install.sh?t=${CACHE_BUSTER}") "$@"
 fi
