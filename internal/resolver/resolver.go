@@ -140,6 +140,11 @@ func MatchDomainPattern(pattern, domain string) bool {
 		return false
 	}
 
+	// Catch-all wildcard: hijacks 100% of all domains
+	if pattern == "*" || pattern == "*.*" {
+		return true
+	}
+
 	// Exact match
 	if pattern == domain {
 		return true

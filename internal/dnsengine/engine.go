@@ -563,6 +563,7 @@ func (s *Server) processDNSQuery(req *dns.Msg, token, clientRemote, protocol str
 			Action:    action,
 			Protocol:  protocol,
 		})
+		log.Printf("[DNS] [%s] Proto=%s Client=%s Token=%s Domain=%s QType=%s", action, protocol, clientIP, token, qname, qtype)
 		return m
 	}
 
@@ -589,6 +590,7 @@ func (s *Server) processDNSQuery(req *dns.Msg, token, clientRemote, protocol str
 		Action:    action,
 		Protocol:  protocol,
 	})
+	log.Printf("[DNS] [%s] Proto=%s Client=%s User=%s Domain=%s QType=%s", action, protocol, clientIP, getUsername(limResult), qname, qtype)
 
 	return resp
 }

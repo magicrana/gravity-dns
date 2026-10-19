@@ -179,6 +179,7 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	_ = targetConn.SetDeadline(time.Now().Add(idleTimeout))
 
 	atomic.AddInt64(&p.totalProxied, 1)
+	log.Printf("[SNI-PROXY] [ROUTED] Client=%s SNI=%s -> Origin=%s", clientConn.RemoteAddr(), sni, originAddr)
 
 	// 10. Bidirectional streaming (Go runtime uses Linux splice(2) zero-copy for *net.TCPConn)
 	p.streamBidirectional(clientConn, targetConn, idleTimeout)
@@ -257,7 +258,7 @@ func (p *Proxy) resolveOrigin(host string) (string, error) {
 	}
 
 	if chosenIP == "" {
-		chosenIP = ips[0]
+		return "", fmt.Errorf("origin IP for %s resolved only to proxy itself (%s), refusing to loop", host, p.cfg.Server.PublicIPv4)
 	}
 
 	// Cache IP for 60 seconds

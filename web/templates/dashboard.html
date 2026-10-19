@@ -462,6 +462,26 @@
 
             <!-- ==================== TAB 3: DOMAIN RULES & PRESETS ==================== -->
             <section id="tab-rules" class="hidden space-y-6">
+                <!-- Global Catch-All Full Traffic Hijack Banner -->
+                <div id="catchall-banner" class="glass-panel rounded-2xl p-5 border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-darkbg flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div class="flex items-start gap-3.5">
+                        <div class="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center flex-shrink-0 text-indigo-400">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-base font-bold text-white">Full Traffic Catch-All Hijack</h3>
+                                <span id="catchall-status-badge" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20">Inactive (Selective Mode)</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-0.5">When active, ALL domains (*) queried by connected devices will be hijacked and routed through your Bangladesh SNI Proxy.</p>
+                        </div>
+                    </div>
+                    <button id="catchall-toggle-btn" onclick="toggleCatchAllMode()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 whitespace-nowrap">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <span>Enable Catch-All (Hijack All)</span>
+                    </button>
+                </div>
+
                 <div>
                     <div class="flex items-center justify-between mb-3">
                         <div>
@@ -508,14 +528,30 @@
 
             <!-- ==================== TAB 4: LIVE QUERY STREAM ==================== -->
             <section id="tab-logs" class="hidden space-y-4">
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div>
-                        <h2 class="text-xl font-bold text-white">Live DNS Query Stream</h2>
-                        <p class="text-xs text-slate-400">Real-time log of the latest 50 DNS resolutions and access control decisions.</p>
+                        <div class="flex items-center gap-2.5">
+                            <h2 class="text-xl font-bold text-white">Live DNS Query Stream</h2>
+                            <span id="log-live-indicator" class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                REALTIME (1s)
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-0.5">Real-time live feed of DNS queries, client tokens, and transparent SNI hijacking.</p>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button onclick="fetchLogs()" class="px-3.5 py-2 rounded-xl bg-darkcard border border-darkborder hover:bg-darkhover text-xs font-medium text-slate-300">
-                            Refresh Logs
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="text" id="log-search-input" placeholder="Search domain, user, IP..." oninput="filterLogsTable()" class="px-3 py-1.5 rounded-xl bg-darkbg border border-darkborder text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-44">
+                        <select id="log-action-filter" onchange="filterLogsTable()" class="px-3 py-1.5 rounded-xl bg-darkbg border border-darkborder text-xs text-slate-300 focus:outline-none">
+                            <option value="ALL">All Status</option>
+                            <option value="HIJACKED">Hijacked Only</option>
+                            <option value="FORWARDED">Forwarded Only</option>
+                            <option value="REFUSED">Refused / Limits</option>
+                        </select>
+                        <button id="btn-pause-logs" onclick="togglePauseLogs()" class="px-3 py-1.5 rounded-xl bg-darkcard border border-darkborder hover:bg-darkhover text-xs font-medium text-slate-300 transition">
+                            Pause
+                        </button>
+                        <button onclick="fetchLogs()" class="px-3.5 py-1.5 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-600 hover:text-white text-xs font-medium transition">
+                            Refresh
                         </button>
                     </div>
                 </div>
@@ -1373,6 +1409,42 @@
             }
         }
 
+        let hasCatchAllActive = false;
+        let isLogsPaused = false;
+        let cachedLogsData = [];
+
+        async function toggleCatchAllMode() {
+            try {
+                if (hasCatchAllActive) {
+                    const res = await fetch('/api/rules/' + encodeURIComponent('*'), { method: 'DELETE' });
+                    if (res.ok) {
+                        showToast('Catch-All disabled. Returned to selective hijack mode.');
+                        fetchRules();
+                        fetchStats();
+                    } else {
+                        const d = await res.json();
+                        showToast(d.error || 'Failed to disable catch-all', true);
+                    }
+                } else {
+                    const res = await fetch('/api/rules', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ domain: '*', category: 'Catch-All (Full Hijack)' })
+                    });
+                    if (res.ok) {
+                        showToast('Full Traffic Catch-All Mode Activated! All client domains are now hijacked.');
+                        fetchRules();
+                        fetchStats();
+                    } else {
+                        const d = await res.json();
+                        showToast(d.error || 'Failed to enable catch-all', true);
+                    }
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
         async function fetchRules() {
             try {
                 const res = await fetch('/api/rules');
@@ -1381,20 +1453,40 @@
                 const tbody = document.getElementById('rules-table-body');
                 tbody.innerHTML = '';
 
+                hasCatchAllActive = (rules || []).some(r => r.domain === '*' && r.enabled);
+                const badge = document.getElementById('catchall-status-badge');
+                const btn = document.getElementById('catchall-toggle-btn');
+                if (badge && btn) {
+                    if (hasCatchAllActive) {
+                        badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+                        badge.textContent = 'Active (100% Full Hijack)';
+                        btn.className = 'px-5 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-red-400 hover:bg-red-600 hover:text-white text-xs font-bold transition flex items-center justify-center gap-2 whitespace-nowrap shadow-sm';
+                        btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg><span>Disable Catch-All</span>`;
+                    } else {
+                        badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20';
+                        badge.textContent = 'Inactive (Selective Mode)';
+                        btn.className = 'px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 whitespace-nowrap';
+                        btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg><span>Enable Catch-All (Hijack All)</span>`;
+                    }
+                }
+
                 if (!rules || rules.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-slate-500">No active hijack rules. Click a preset above or "Add Custom Domain".</td></tr>`;
                     return;
                 }
 
                 rules.forEach(r => {
+                    const isWild = r.domain === '*';
                     const statusBadge = r.enabled
-                        ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Spoofing Active</span>`
+                        ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">${isWild ? '🔥 Full Hijack' : 'Spoofing Active'}</span>`
                         : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20">Disabled</span>`;
 
                     const tr = document.createElement('tr');
-                    tr.className = 'hover:bg-darkpanel/50 transition';
+                    tr.className = isWild ? 'bg-indigo-950/20 hover:bg-indigo-900/30 transition' : 'hover:bg-darkpanel/50 transition';
                     tr.innerHTML = `
-                        <td class="py-3 px-4 font-semibold text-white code-font">${escapeHtml(r.domain)}</td>
+                        <td class="py-3 px-4 font-semibold text-white code-font flex items-center gap-2">
+                            ${isWild ? '<span class="text-amber-400 font-bold">* (Catch-All)</span>' : escapeHtml(r.domain)}
+                        </td>
                         <td class="py-3 px-4 text-slate-400 text-xs">${escapeHtml(r.category || 'General')}</td>
                         <td class="py-3 px-4">${statusBadge}</td>
                         <td class="py-3 px-4 text-right space-x-1">
@@ -1439,39 +1531,99 @@
             } catch (e) {}
         }
 
+        function togglePauseLogs() {
+            isLogsPaused = !isLogsPaused;
+            const btn = document.getElementById('btn-pause-logs');
+            const ind = document.getElementById('log-live-indicator');
+            if (btn) {
+                btn.textContent = isLogsPaused ? 'Resume' : 'Pause';
+                btn.className = isLogsPaused
+                    ? 'px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 font-medium text-xs transition'
+                    : 'px-3 py-1.5 rounded-xl bg-darkcard border border-darkborder hover:bg-darkhover text-xs font-medium text-slate-300 transition';
+            }
+            if (ind) {
+                if (isLogsPaused) {
+                    ind.className = 'flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20';
+                    ind.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> PAUSED`;
+                } else {
+                    ind.className = 'flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+                    ind.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> REALTIME (1s)`;
+                    fetchLogs();
+                }
+            }
+        }
+
         async function fetchLogs() {
+            if (isLogsPaused) return;
             try {
                 const res = await fetch('/api/logs?limit=50');
                 if (!res.ok) return;
-                const logs = await res.json();
-                const tbody = document.getElementById('logs-table-body');
-                tbody.innerHTML = '';
-
-                if (!logs || logs.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500 font-sans">No DNS queries recorded yet.</td></tr>`;
-                    return;
-                }
-
-                logs.forEach(l => {
-                    const actionBadge = getActionBadge(l.action);
-                    const timeStr = new Date(l.timestamp * 1000).toLocaleTimeString();
-
-                    const tr = document.createElement('tr');
-                    tr.className = 'hover:bg-darkpanel/50 transition';
-                    tr.innerHTML = `
-                        <td class="py-2.5 px-4 text-slate-400">${timeStr}</td>
-                        <td class="py-2.5 px-4 text-indigo-400 font-semibold">${escapeHtml(l.username || l.token)}</td>
-                        <td class="py-2.5 px-4 text-slate-300">${escapeHtml(l.client_ip)}</td>
-                        <td class="py-2.5 px-4 text-white font-medium">${escapeHtml(l.domain)}</td>
-                        <td class="py-2.5 px-4 text-slate-400">${escapeHtml(l.qtype)}</td>
-                        <td class="py-2.5 px-4 text-slate-400">${escapeHtml(l.protocol)}</td>
-                        <td class="py-2.5 px-4 text-right">${actionBadge}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
+                cachedLogsData = await res.json();
+                renderFilteredLogs();
             } catch (e) {
                 console.error(e);
             }
+        }
+
+        function filterLogsTable() {
+            renderFilteredLogs();
+        }
+
+        function renderFilteredLogs() {
+            const tbody = document.getElementById('logs-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            if (!cachedLogsData || cachedLogsData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500 font-sans">No DNS queries recorded yet.</td></tr>`;
+                return;
+            }
+
+            const searchInput = document.getElementById('log-search-input');
+            const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+            const actionFilter = document.getElementById('log-action-filter');
+            const filterVal = actionFilter ? actionFilter.value : 'ALL';
+
+            const filtered = cachedLogsData.filter(l => {
+                if (filterVal !== 'ALL') {
+                    if (filterVal === 'REFUSED') {
+                        if (!l.action.startsWith('REFUSED')) return false;
+                    } else if (l.action !== filterVal) {
+                        return false;
+                    }
+                }
+                if (query) {
+                    const matchDomain = (l.domain || '').toLowerCase().includes(query);
+                    const matchUser = (l.username || l.token || '').toLowerCase().includes(query);
+                    const matchIP = (l.client_ip || '').toLowerCase().includes(query);
+                    const matchAct = (l.action || '').toLowerCase().includes(query);
+                    return matchDomain || matchUser || matchIP || matchAct;
+                }
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500 font-sans">No queries matching current filter.</td></tr>`;
+                return;
+            }
+
+            filtered.forEach(l => {
+                const actionBadge = getActionBadge(l.action);
+                const timeStr = new Date(l.timestamp * 1000).toLocaleTimeString();
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-darkpanel/50 transition';
+                tr.innerHTML = `
+                    <td class="py-2.5 px-4 text-slate-400">${timeStr}</td>
+                    <td class="py-2.5 px-4 text-indigo-400 font-semibold">${escapeHtml(l.username || l.token)}</td>
+                    <td class="py-2.5 px-4 text-slate-300">${escapeHtml(l.client_ip)}</td>
+                    <td class="py-2.5 px-4 text-white font-medium">${escapeHtml(l.domain)}</td>
+                    <td class="py-2.5 px-4 text-slate-400">${escapeHtml(l.qtype)}</td>
+                    <td class="py-2.5 px-4 text-slate-400">${escapeHtml(l.protocol)}</td>
+                    <td class="py-2.5 px-4 text-right">${actionBadge}</td>
+                `;
+                tbody.appendChild(tr);
+            });
         }
 
         function getActionBadge(action) {
@@ -1960,14 +2112,18 @@
         // Initialize and start background periodic pollers
         refreshCurrentTab();
 
+        // Dedicated fast 1-second poller for Realtime Live DNS Query Stream
+        setInterval(() => {
+            if (currentTab === 'logs' && !isLogsPaused) {
+                fetchLogs();
+            }
+        }, 1000);
+
         setInterval(() => {
             fetchStats();
             const autoRef = document.getElementById('auto-refresh-toggle');
             if (currentTab === 'devices' && autoRef && autoRef.checked) {
                 fetchAllDevices();
-            }
-            if (currentTab === 'logs') {
-                fetchLogs();
             }
             if (currentTab === 'redis') {
                 fetchRedisInfo();
