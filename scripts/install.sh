@@ -236,7 +236,8 @@ echo -e "\n${BOLD}=== Step 2: System Packages & Dependencies ===${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \
-    curl git build-essential ufw redis-server certbot python3-certbot-dns-cloudflare ca-certificates openssl
+    curl git build-essential ufw redis-server certbot python3-certbot-dns-cloudflare python3-pip ca-certificates openssl
+pip3 install --upgrade --break-system-packages "cloudflare>=2.3.1" >/dev/null 2>&1 || true
 
 # Ensure Redis is running and starts on boot
 systemctl enable redis-server
@@ -328,30 +329,66 @@ fi
 rm -rf /var/lib/gravity/web
 cp -r "${SOURCE_DIR}/web" /var/lib/gravity/
 
-# Automated Let's Encrypt Wildcard SSL provisioning if Cloudflare API Token provided
+# Automated Let's Encrypt Wildcard SSL provisioning if Cloudflare credentials provided
 if [ -n "${CF_TOKEN:-}" ]; then
     echo -e "\n${CYAN}Automating Let's Encrypt Wildcard SSL (*.${DOMAIN}) via Cloudflare DNS...${NC}"
     mkdir -p /root/.secrets/certbot
-    cat > /root/.secrets/certbot/cloudflare.ini << EOF
+    CF_EMAIL="${CF_EMAIL:-admin@${DOMAIN}}"
+
+    write_cf_ini() {
+        local use_global="$1"
+        if [ "$use_global" = "true" ]; then
+            cat > /root/.secrets/certbot/cloudflare.ini << EOF
+dns_cloudflare_email = ${CF_EMAIL}
+dns_cloudflare_api_key = ${CF_TOKEN}
+EOF
+        else
+            cat > /root/.secrets/certbot/cloudflare.ini << EOF
 dns_cloudflare_api_token = ${CF_TOKEN}
 EOF
-    chmod 600 /root/.secrets/certbot/cloudflare.ini
+        fi
+        chmod 600 /root/.secrets/certbot/cloudflare.ini
+    }
 
-    certbot certonly \
+    IS_GLOBAL=false
+    if echo "${CF_TOKEN}" | grep -Eq '^[0-9a-fA-F]{37}$'; then
+        IS_GLOBAL=true
+    fi
+
+    write_cf_ini "$IS_GLOBAL"
+
+    CERTBOT_OUT=$(certbot certonly \
         --dns-cloudflare \
         --dns-cloudflare-credentials /root/.secrets/certbot/cloudflare.ini \
-        --dns-cloudflare-propagation-seconds 25 \
+        --dns-cloudflare-propagation-seconds 30 \
         -d "${DOMAIN}" \
         -d "*.${DOMAIN}" \
-        --email "admin@${DOMAIN}" \
+        --email "${CF_EMAIL}" \
         --agree-tos \
         --no-eff-email \
-        --non-interactive || echo -e "${YELLOW}Notice: Certbot initial run did not complete. You can issue certificate with 1-click in the Web UI.${NC}"
+        --non-interactive 2>&1) || CERTBOT_EXIT=$?
+
+    if [ "${CERTBOT_EXIT:-0}" -ne 0 ] && [ "$IS_GLOBAL" = "false" ] && echo "$CERTBOT_OUT" | grep -q "Property \"dns_cloudflare_email\" not found"; then
+        echo -e "${YELLOW}Retrying with Cloudflare Global API Key format...${NC}"
+        write_cf_ini "true"
+        certbot certonly \
+            --dns-cloudflare \
+            --dns-cloudflare-credentials /root/.secrets/certbot/cloudflare.ini \
+            --dns-cloudflare-propagation-seconds 30 \
+            -d "${DOMAIN}" \
+            -d "*.${DOMAIN}" \
+            --email "${CF_EMAIL}" \
+            --agree-tos \
+            --no-eff-email \
+            --non-interactive 2>&1 || true
+    fi
 
     if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
         TLS_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
         TLS_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
         echo -e "${GREEN}Let's Encrypt Wildcard certificate issued successfully!${NC}"
+    else
+        echo -e "${YELLOW}Notice: Certbot initial run did not complete. You can issue or retry certificate with 1-click in the Web UI.${NC}"
     fi
 fi
 

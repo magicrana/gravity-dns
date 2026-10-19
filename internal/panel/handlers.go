@@ -454,42 +454,88 @@ func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.R
 	if _, err := exec.LookPath("certbot"); err != nil {
 		installCmd := exec.Command("apt-get", "update", "-y")
 		_ = installCmd.Run()
-		installPkg := exec.Command("apt-get", "install", "-y", "--no-install-recommends", "certbot", "python3-certbot-dns-cloudflare")
+		installPkg := exec.Command("apt-get", "install", "-y", "--no-install-recommends", "certbot", "python3-certbot-dns-cloudflare", "python3-pip")
 		if out, err := installPkg.CombinedOutput(); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to install certbot packages: %v\nOutput: %s", err, string(out)))
 			return
 		}
 	}
 
-	// 2. Write Cloudflare credentials file
+	// Ensure python3 cloudflare library supports modern API Tokens
+	_ = exec.Command("pip3", "install", "--upgrade", "--break-system-packages", "cloudflare>=2.3.1").Run()
+
 	secretDir := "/root/.secrets/certbot"
 	_ = os.MkdirAll(secretDir, 0700)
 	iniPath := filepath.Join(secretDir, "cloudflare.ini")
-	iniContent := fmt.Sprintf("dns_cloudflare_api_token = %s\n", apiToken)
-	if err := os.WriteFile(iniPath, []byte(iniContent), 0600); err != nil {
+
+	// Determine credential format: Cloudflare Global API Key is 37 hex characters
+	isHexString := func(s string) bool {
+		if s == "" {
+			return false
+		}
+		for _, c := range s {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+		return true
+	}
+	isGlobalKey := len(apiToken) == 37 && isHexString(apiToken)
+
+	writeCredentials := func(useGlobal bool) error {
+		var content string
+		if useGlobal {
+			content = fmt.Sprintf("dns_cloudflare_email = %s\ndns_cloudflare_api_key = %s\n", email, apiToken)
+		} else {
+			content = fmt.Sprintf("dns_cloudflare_api_token = %s\n", apiToken)
+		}
+		return os.WriteFile(iniPath, []byte(content), 0600)
+	}
+
+	if err := writeCredentials(isGlobalKey); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to write Cloudflare credentials file: "+err.Error())
 		return
 	}
 
 	// 3. Execute Certbot ACME DNS-01 Challenge for domain and wildcard *.domain
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	runCertbot := func() ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
 
-	cmd := exec.CommandContext(ctx, "certbot", "certonly",
-		"--dns-cloudflare",
-		"--dns-cloudflare-credentials", iniPath,
-		"--dns-cloudflare-propagation-seconds", "25",
-		"-d", domain,
-		"-d", "*."+domain,
-		"--email", email,
-		"--agree-tos",
-		"--no-eff-email",
-		"--non-interactive",
-	)
+		cmd := exec.CommandContext(ctx, "certbot", "certonly",
+			"--dns-cloudflare",
+			"--dns-cloudflare-credentials", iniPath,
+			"--dns-cloudflare-propagation-seconds", "30",
+			"-d", domain,
+			"-d", "*."+domain,
+			"--email", email,
+			"--agree-tos",
+			"--no-eff-email",
+			"--non-interactive",
+		)
+		return cmd.CombinedOutput()
+	}
 
-	out, err := cmd.CombinedOutput()
+	out, err := runCertbot()
 	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Certbot issuance failed: %v\nDetails:\n%s", err, string(out)))
+		outStr := string(out)
+		// If certbot fails because it expects email + api_key format, retry with global key format
+		if !isGlobalKey && (strings.Contains(outStr, "Property \"dns_cloudflare_email\" not found") || strings.Contains(outStr, "Property \"dns_cloudflare_api_key\" not found")) {
+			if writeErr := writeCredentials(true); writeErr == nil {
+				retryOut, retryErr := runCertbot()
+				if retryErr == nil {
+					out = retryOut
+					err = nil
+				} else {
+					out = append(out, []byte("\n--- Automatic retry with Global API Key format also failed: ---\n")...)
+					out = append(out, retryOut...)
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Certbot issuance failed: %v\nDetails:\n%s\n\nCloudflare Tips:\n- If using an API Token: Ensure permissions are set to: Zone -> DNS -> Edit (All Zones or %s).\n- If using a Global API Key: Ensure you have provided your Cloudflare account login email in the Email field.", err, string(out), domain))
 		return
 	}
 

@@ -62,29 +62,37 @@ case "$CHOICE" in
         echo "  - Zone -> DNS -> Edit"
         echo "  - Zone Resources -> All zones (or select ${DOMAIN})"
         echo ""
-        read -rp "Paste your Cloudflare API Token: " CF_TOKEN
+        read -rp "Paste your Cloudflare API Token or Global API Key: " CF_TOKEN
         CF_TOKEN=$(echo "$CF_TOKEN" | tr -d '[:space:]')
 
         if [ -z "$CF_TOKEN" ]; then
-            echo -e "${RED}[ERROR] Token cannot be empty.${NC}"
+            echo -e "${RED}[ERROR] Credential cannot be empty.${NC}"
             exit 1
         fi
 
-        echo -e "\n${CYAN}Installing Certbot Cloudflare DNS plugin...${NC}"
+        read -rp "Enter Cloudflare Account Email (Required if using Global API Key): " CF_EMAIL
+        CF_EMAIL="${CF_EMAIL:-admin@${DOMAIN}}"
+
+        echo -e "\n${CYAN}Installing Certbot Cloudflare DNS plugin & updating python-cloudflare...${NC}"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -y
-        apt-get install -y --no-install-recommends certbot python3-certbot-dns-cloudflare
+        apt-get install -y --no-install-recommends certbot python3-certbot-dns-cloudflare python3-pip
+        pip3 install --upgrade --break-system-packages "cloudflare>=2.3.1" >/dev/null 2>&1 || true
 
         mkdir -p /root/.secrets/certbot
-        cat > /root/.secrets/certbot/cloudflare.ini << EOF
-# Cloudflare API token for Certbot DNS challenge
+        if echo "${CF_TOKEN}" | grep -Eq '^[0-9a-fA-F]{37}$'; then
+            cat > /root/.secrets/certbot/cloudflare.ini << EOF
+dns_cloudflare_email = ${CF_EMAIL}
+dns_cloudflare_api_key = ${CF_TOKEN}
+EOF
+        else
+            cat > /root/.secrets/certbot/cloudflare.ini << EOF
 dns_cloudflare_api_token = ${CF_TOKEN}
 EOF
+        fi
         chmod 600 /root/.secrets/certbot/cloudflare.ini
 
         echo -e "\n${CYAN}Requesting Wildcard Certificate from Let's Encrypt for ${DOMAIN} and *.${DOMAIN}...${NC}"
-        read -rp "Enter notification email address (for certificate expiration notices): " CF_EMAIL
-        CF_EMAIL="${CF_EMAIL:-admin@${DOMAIN}}"
 
         certbot certonly \
             --dns-cloudflare \

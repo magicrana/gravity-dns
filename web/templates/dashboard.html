@@ -1113,16 +1113,17 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Cloudflare API Token</label>
-                    <input type="text" id="auto-cert-cf-token" required placeholder="Paste Cloudflare API Token (Zone -> DNS -> Edit)"
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Cloudflare API Token / Global API Key</label>
+                    <input type="text" id="auto-cert-cf-token" required placeholder="Paste Cloudflare API Token (40 chars) or Global API Key (37 hex chars)"
                         class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-xs code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-                    <p class="text-[11px] text-slate-400 mt-1">Get this from <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" class="text-indigo-400 underline hover:text-indigo-300">Cloudflare &rarr; My Profile &rarr; API Tokens</a> using the "Edit zone DNS" template.</p>
+                    <p class="text-[11px] text-slate-400 mt-1">Available at <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" class="text-indigo-400 underline hover:text-indigo-300">Cloudflare &rarr; Profile &rarr; API Tokens</a>. Both scoped API Tokens and Global API Keys are automatically supported.</p>
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Notification Email (Optional)</label>
-                    <input type="email" id="auto-cert-email" placeholder="admin@domain.com"
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Cloudflare Account Email</label>
+                    <input type="email" id="auto-cert-email" placeholder="your-cloudflare-email@example.com (Required for Global API Key)"
                         class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <p class="text-[11px] text-slate-400 mt-1">Your Cloudflare login email. Required if using Global API Key; recommended for renewal notices if using API Token.</p>
                 </div>
 
                 <div class="flex justify-end gap-2 pt-2">
