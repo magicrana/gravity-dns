@@ -1127,6 +1127,17 @@
             }
         }
 
+        // Global Modal Helpers
+        function openModal(id) {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('hidden');
+        }
+
+        function closeModal(id) {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        }
+
         function showToast(msg, isError = false) {
             const toast = document.getElementById('toast');
             const msgEl = document.getElementById('toast-message');
@@ -1860,16 +1871,13 @@
 
         // Modals management
         function openCreateUserModal() {
-            document.getElementById('modal-create-user').classList.remove('hidden');
+            openModal('modal-create-user');
         }
         function openAddRuleModal() {
-            document.getElementById('modal-add-rule').classList.remove('hidden');
+            openModal('modal-add-rule');
         }
         function openUploadCertModal() {
-            document.getElementById('modal-upload-cert').classList.remove('hidden');
-        }
-        function closeModal(id) {
-            document.getElementById(id).classList.add('hidden');
+            openModal('modal-upload-cert');
         }
 
         // Form: Create User
