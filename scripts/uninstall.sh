@@ -145,6 +145,18 @@ echo -e "${GREEN}[OK] Binaries removed from /usr/local/bin/.${NC}"
 # ==================== STEP 4: REMOVE DIRECTORIES & CONFIGS ====================
 echo -e "\n${CYAN}Step 4: Deleting application directories and configurations...${NC}"
 
+# Detect configured panel port before deleting configuration
+CONFIGURED_PANEL_PORT="8080"
+if [ -f "/etc/gravity/gravity.yaml" ]; then
+    CONFIG_LISTEN=$(grep -E '^[[:space:]]*listen:' /etc/gravity/gravity.yaml 2>/dev/null | tail -n1 | sed -E 's/^[[:space:]]*listen:[[:space:]]*//; s/[[:space:]]*#.*$//; s/^["\x27]//; s/["\x27]$//' | tr -d '[:space:]')
+    if [ -n "$CONFIG_LISTEN" ]; then
+        DETECTED_PORT=$(echo "$CONFIG_LISTEN" | awk -F: '{print $NF}' | tr -dc '0-9')
+        if [ -n "$DETECTED_PORT" ]; then
+            CONFIGURED_PANEL_PORT="$DETECTED_PORT"
+        fi
+    fi
+fi
+
 # Backup config just in case if not in force mode
 if [ -f "/etc/gravity/gravity.yaml" ] && [ "$FORCE" != "true" ]; then
     cp "/etc/gravity/gravity.yaml" "/root/gravity.yaml.uninstalled.bak" 2>/dev/null || true
@@ -187,10 +199,13 @@ if command -v ufw &>/dev/null; then
     ufw delete allow 8443/tcp >/dev/null 2>&1 || true
     ufw delete allow 443/tcp >/dev/null 2>&1 || true
     ufw delete allow 8080/tcp >/dev/null 2>&1 || true
+    if [ "$CONFIGURED_PANEL_PORT" != "8080" ]; then
+        ufw delete allow "${CONFIGURED_PANEL_PORT}/tcp" >/dev/null 2>&1 || true
+    fi
     if [ "$REMOVE_WG" = "true" ]; then
         ufw delete allow 51820/udp >/dev/null 2>&1 || true
     fi
-    echo -e "${GREEN}[OK] Firewall rules cleaned (ports 853, 8443, 443, 8080).${NC}"
+    echo -e "${GREEN}[OK] Firewall rules cleaned (ports 853, 8443, 443, 8080, ${CONFIGURED_PANEL_PORT}).${NC}"
 fi
 
 # ==================== STEP 7: RESTORE KERNEL SYSCTL ====================
@@ -200,7 +215,11 @@ echo -e "${GREEN}[OK] Sysctl state reloaded.${NC}"
 
 # ==================== STEP 8: VERIFY PORT RELEASES ====================
 echo -e "\n${CYAN}Step 8: Verifying port availability...${NC}"
-for PORT in 853 8443 443 8080; do
+CHECK_PORTS=(853 8443 443 8080)
+if [ "$CONFIGURED_PANEL_PORT" != "8080" ]; then
+    CHECK_PORTS+=("$CONFIGURED_PANEL_PORT")
+fi
+for PORT in "${CHECK_PORTS[@]}"; do
     if command -v ss &>/dev/null; then
         if ss -tlnp | grep -q ":${PORT} "; then
             echo -e "  - ${YELLOW}Warning: Port ${PORT} still in use by another process:${NC}"

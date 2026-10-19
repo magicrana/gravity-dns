@@ -611,9 +611,16 @@
                                     class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
                             </div>
 
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Web Management Panel Port</label>
+                                <input type="number" id="setting-panel-port" min="1" max="65535" required placeholder="8080"
+                                    class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm code-font focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                                <p class="text-[11px] text-slate-500 mt-1">HTTP port for this control panel (e.g. 8080, 8888, 9090, 2087). Changing this port updates gravity.yaml.</p>
+                            </div>
+
                             <div class="pt-2">
                                 <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition shadow-lg shadow-indigo-600/30">
-                                    Save Domain Settings
+                                    Save Network & Panel Settings
                                 </button>
                             </div>
                         </form>
@@ -1686,6 +1693,7 @@
                 document.getElementById('preview-domain').textContent = d.domain;
                 document.getElementById('setting-ipv4').value = d.public_ipv4;
                 document.getElementById('setting-ipv6').value = d.public_ipv6 || '';
+                document.getElementById('setting-panel-port').value = d.panel_port || 8080;
 
                 serverBaseDomain = d.domain;
                 serverIPv4 = d.public_ipv4;
@@ -1704,16 +1712,21 @@
             const domain = document.getElementById('setting-domain').value.trim();
             const public_ipv4 = document.getElementById('setting-ipv4').value.trim();
             const public_ipv6 = document.getElementById('setting-ipv6').value.trim();
+            const panel_port = parseInt(document.getElementById('setting-panel-port').value.trim(), 10) || 8080;
 
             try {
                 const res = await fetch('/api/settings/domain', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ domain, public_ipv4, public_ipv6 })
+                    body: JSON.stringify({ domain, public_ipv4, public_ipv6, panel_port })
                 });
                 const d = await res.json();
                 if (res.ok) {
-                    showToast('Domain and network settings updated successfully!');
+                    if (d.port_changed) {
+                        showToast(`Panel port updated to ${d.panel_port}! Service restart required to switch port.`);
+                    } else {
+                        showToast('Domain, network, and panel settings saved successfully!');
+                    }
                     fetchSettings();
                 } else {
                     showToast(d.error || 'Failed to update settings', true);

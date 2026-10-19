@@ -123,6 +123,12 @@ if [ -f "$CONFIG_PATH" ]; then
     PREV_REDIS_ADDR=$(read_yaml_value "$CONFIG_PATH" "addr")
     PREV_TLS_CERT=$(read_yaml_value "$CONFIG_PATH" "tls_cert_file")
     PREV_TLS_KEY=$(read_yaml_value "$CONFIG_PATH" "tls_key_file")
+    PREV_PANEL_LISTEN=$(read_yaml_value "$CONFIG_PATH" "listen")
+    PREV_PANEL_PORT="8080"
+    if [ -n "$PREV_PANEL_LISTEN" ]; then
+        PREV_PANEL_PORT=$(echo "$PREV_PANEL_LISTEN" | awk -F: '{print $NF}' | tr -dc '0-9')
+        PREV_PANEL_PORT="${PREV_PANEL_PORT:-8080}"
+    fi
 
     if [ -n "$PREV_ADMIN_PASS" ] || [ -n "$PREV_DOMAIN" ]; then
         IS_REINSTALL=true
@@ -156,6 +162,11 @@ if [ "$IS_REINSTALL" = "true" ]; then
         echo -e "  Admin Password: ${GREEN}${BOLD}[Preserved from last installation: ${ADMIN_PASS}]${NC}"
     fi
 
+    # 4. Web Management Panel Port
+    PORT_DEFAULT="${GRAVITY_PANEL_PORT:-${PREV_PANEL_PORT:-8080}}"
+    prompt_input "Enter Custom Port for Web Management Panel: [${PORT_DEFAULT}] " INPUT_PANEL_PORT "$PORT_DEFAULT"
+    PANEL_PORT="${INPUT_PANEL_PORT:-$PORT_DEFAULT}"
+
     JWT_SECRET="${PREV_JWT_SECRET:-$(openssl rand -hex 24 2>/dev/null || echo "gravity_secret_jwt_random_key_123456789")}"
     REDIS_PASS="${PREV_REDIS_PASS:-}"
     REDIS_ADDR="${PREV_REDIS_ADDR:-127.0.0.1:6379}"
@@ -182,7 +193,12 @@ else
     prompt_input "Set Web Management Panel Admin Password: [${PW_DEFAULT}] " INPUT_PW "$PW_DEFAULT"
     ADMIN_PASS="${INPUT_PW:-$PW_DEFAULT}"
 
-    # 4. Optional Cloudflare API Token for Automated Let's Encrypt Wildcard SSL
+    # 4. Web Management Panel Port
+    PORT_DEFAULT="${GRAVITY_PANEL_PORT:-8080}"
+    prompt_input "Enter Custom Port for Web Management Panel: [${PORT_DEFAULT}] " INPUT_PANEL_PORT "$PORT_DEFAULT"
+    PANEL_PORT="${INPUT_PANEL_PORT:-$PORT_DEFAULT}"
+
+    # 5. Optional Cloudflare API Token for Automated Let's Encrypt Wildcard SSL
     CF_TOKEN_DEFAULT="${GRAVITY_CF_TOKEN:-}"
     prompt_input "Enter Cloudflare API Token for Automated Let's Encrypt Wildcard SSL (Optional - press Enter to skip or configure in Web UI): [${CF_TOKEN_DEFAULT}] " INPUT_CF "$CF_TOKEN_DEFAULT"
     CF_TOKEN="${INPUT_CF:-$CF_TOKEN_DEFAULT}"
@@ -198,6 +214,7 @@ echo ""
 echo -e "${CYAN}Configuration Profile:${NC}"
 echo -e "  Base Domain:    ${BOLD}${DOMAIN}${NC} (Wildcard: *.${DOMAIN})"
 echo -e "  Public IPv4:    ${BOLD}${PUBLIC_IP}${NC}"
+echo -e "  Panel Port:     ${BOLD}${PANEL_PORT}${NC}"
 echo -e "  Admin User:     ${BOLD}${ADMIN_USER}${NC}"
 if [ "$IS_REINSTALL" = "true" ]; then
     echo -e "  Admin Password: ${GREEN}${BOLD}${ADMIN_PASS} (Preserved from last installation)${NC}"
@@ -374,7 +391,7 @@ redis:
 
 panel:
   enabled: true
-  listen: "0.0.0.0:8080"
+  listen: "0.0.0.0:${PANEL_PORT}"
   jwt_secret: "${JWT_SECRET}"
   admin_username: "${ADMIN_USER:-admin}"
   admin_password: "${ADMIN_PASS}"
@@ -440,9 +457,12 @@ if command -v ufw &>/dev/null; then
         ufw allow 8443/tcp comment "GravityDNS DoH" >/dev/null 2>&1 || true
         ufw allow 443/tcp comment "GravityDNS SNI Proxy" >/dev/null 2>&1 || true
         ufw allow 80/tcp comment "Certbot ACME" >/dev/null 2>&1 || true
-        ufw allow 8080/tcp comment "GravityDNS Web Panel" >/dev/null 2>&1 || true
+        ufw allow "${PANEL_PORT}/tcp" comment "GravityDNS Web Panel" >/dev/null 2>&1 || true
+        if [ -n "${PREV_PANEL_PORT:-}" ] && [ "${PREV_PANEL_PORT}" != "${PANEL_PORT}" ]; then
+            ufw delete allow "${PREV_PANEL_PORT}/tcp" >/dev/null 2>&1 || true
+        fi
         ufw allow 51820/udp comment "WireGuard VPN Tunnel" >/dev/null 2>&1 || true
-        echo -e "${GREEN}Firewall rules configured for ports 853, 8443, 443, 80, 8080, 51820(UDP).${NC}"
+        echo -e "${GREEN}Firewall rules configured for ports 853, 8443, 443, 80, ${PANEL_PORT}, 51820(UDP).${NC}"
     } || echo "UFW is not active, skipping firewall rule injection."
 fi
 
@@ -464,14 +484,14 @@ if [ "$IS_REINSTALL" = "true" ]; then
     echo -e "\n${GREEN}${BOLD}========================================================================${NC}"
     echo -e "${GREEN}${BOLD}       GravityDNS Platform Reinstalled & Updated Successfully!          ${NC}"
     echo -e "${GREEN}${BOLD}========================================================================${NC}"
-    echo -e "  Admin Control Panel:  ${BOLD}http://${PUBLIC_IP}:8080${NC} (or http://${DOMAIN}:8080)"
+    echo -e "  Admin Control Panel:  ${BOLD}http://${PUBLIC_IP}:${PANEL_PORT}${NC} (or http://${DOMAIN}:${PANEL_PORT})"
     echo -e "  Admin Username:       ${BOLD}${ADMIN_USER:-admin}${NC}"
     echo -e "  Admin Password:       ${BOLD}${ADMIN_PASS}${NC} ${GREEN}(Preserved from last installation)${NC}"
     echo -e ""
     echo -e "  Upgraded Components:"
     echo -e "    - Pure Go DNS Engine (:853, :8443)  -> Recompiled & Updated"
     echo -e "    - Pure Go SNI Router (:443)         -> Recompiled & Updated"
-    echo -e "    - Web Admin Management Panel        -> Recompiled & Updated"
+    echo -e "    - Web Admin Management Panel (:${PANEL_PORT}) -> Recompiled & Updated"
     echo -e "    - Web UI & Left Sidebar Templates   -> Updated in /var/lib/gravity/web"
     echo -e "    - Kernel Sysctl & Firewall Rules    -> Verified & Synchronized"
     echo -e "    - Admin Credentials                 -> ${GREEN}Preserved Unchanged${NC}"
@@ -489,7 +509,7 @@ else
     echo -e "\n${GREEN}${BOLD}========================================================================${NC}"
     echo -e "${GREEN}${BOLD}          GravityDNS Deployment Completed Successfully!                 ${NC}"
     echo -e "${GREEN}${BOLD}========================================================================${NC}"
-    echo -e "  Admin Control Panel:  ${BOLD}http://${PUBLIC_IP}:8080${NC} (or http://${DOMAIN}:8080)"
+    echo -e "  Admin Control Panel:  ${BOLD}http://${PUBLIC_IP}:${PANEL_PORT}${NC} (or http://${DOMAIN}:${PANEL_PORT})"
     echo -e "  Default Admin User:   ${BOLD}admin${NC}"
     echo -e "  Admin Password:       ${BOLD}${ADMIN_PASS}${NC}"
     echo -e ""
@@ -497,6 +517,7 @@ else
     echo -e "    - DoT (DNS-over-TLS):   ${BOLD}0.0.0.0:853${NC}   (<token>.${DOMAIN})"
     echo -e "    - DoH (DNS-over-HTTPS): ${BOLD}0.0.0.0:8443${NC}  (https://${DOMAIN}:8443/dns-query/<token>)"
     echo -e "    - SNI Proxy Router:     ${BOLD}0.0.0.0:443${NC}   (TCP Zero-Copy Splice)"
+    echo -e "    - Web Control Panel:    ${BOLD}0.0.0.0:${PANEL_PORT}${NC}"
     echo -e ""
     echo -e "  Service Management:"
     echo -e "    - Status:   ${BOLD}systemctl status gravity.service${NC}"

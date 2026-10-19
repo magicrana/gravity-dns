@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -255,10 +256,23 @@ func (h *APIHandler) handleUpdateAdminProfile(w http.ResponseWriter, r *http.Req
 func (h *APIHandler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	currentAdmin, _ := r.Context().Value(AdminContextKey).(string)
 
+	panelListen := h.cfg.Panel.Listen
+	if panelListen == "" {
+		panelListen = "0.0.0.0:8080"
+	}
+	panelPort := 8080
+	if _, portStr, err := net.SplitHostPort(panelListen); err == nil {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			panelPort = p
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"domain":            h.cfg.Server.Domain,
 		"public_ipv4":       h.cfg.Server.PublicIPv4,
 		"public_ipv6":       h.cfg.Server.PublicIPv6,
+		"panel_listen":      panelListen,
+		"panel_port":        panelPort,
 		"dot_listen":        h.cfg.DNS.DoTListen,
 		"doh_listen":        h.cfg.DNS.DoHListen,
 		"sni_listen":        h.cfg.SNIProxy.Listen,
@@ -269,12 +283,13 @@ func (h *APIHandler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUpdateDomainSettings updates base domain and spoofing IPs.
+// handleUpdateDomainSettings updates base domain, spoofing IPs, and custom panel port.
 func (h *APIHandler) handleUpdateDomainSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Domain     string `json:"domain"`
 		PublicIPv4 string `json:"public_ipv4"`
 		PublicIPv6 string `json:"public_ipv6"`
+		PanelPort  int    `json:"panel_port"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -301,15 +316,30 @@ func (h *APIHandler) handleUpdateDomainSettings(w http.ResponseWriter, r *http.R
 		if h.resolver != nil {
 			h.resolver.UpdateServerIPs(req.PublicIPv4, req.PublicIPv6)
 		}
-		_ = config.SaveConfig(h.cfg)
 	}
 
+	portChanged := false
+	currentPort := 8080
+	if _, pStr, err := net.SplitHostPort(h.cfg.Panel.Listen); err == nil {
+		if p, err := strconv.Atoi(pStr); err == nil {
+			currentPort = p
+		}
+	}
+	if req.PanelPort > 0 && req.PanelPort <= 65535 && req.PanelPort != currentPort {
+		h.cfg.Panel.Listen = fmt.Sprintf("0.0.0.0:%d", req.PanelPort)
+		portChanged = true
+	}
+
+	_ = config.SaveConfig(h.cfg)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success":     true,
-		"domain":      h.cfg.Server.Domain,
-		"public_ipv4": h.cfg.Server.PublicIPv4,
-		"public_ipv6": h.cfg.Server.PublicIPv6,
-		"message":     "domain and spoofing settings updated successfully",
+		"success":      true,
+		"domain":       h.cfg.Server.Domain,
+		"public_ipv4":  h.cfg.Server.PublicIPv4,
+		"public_ipv6":  h.cfg.Server.PublicIPv6,
+		"panel_port":   req.PanelPort,
+		"port_changed": portChanged,
+		"message":      "Settings updated successfully.",
 	})
 }
 
