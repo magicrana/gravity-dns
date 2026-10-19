@@ -120,6 +120,21 @@ bash <(curl -fsSL https://raw.githubusercontent.com/magicrana/gravity-dns/main/i
 ```
 The installer automatically detects your existing installation and **updates everything** (Go engine binaries, web control panel templates, kernel configs, systemd services) **while strictly preserving your last installed admin password, base domain, TLS certificates, and settings**. A backup of your previous configuration is also automatically preserved at `/etc/gravity/gravity.yaml.bak`.
 
+### 🗑️ Complete Uninstallation
+To completely remove GravityDNS, all binaries, configs, systemd services, Redis state, and firewall rules from your server:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/magicrana/gravity-dns/main/scripts/uninstall.sh)
+```
+*Or if cloned locally:*
+```bash
+sudo bash /opt/gravity-dns/scripts/uninstall.sh
+```
+*Non-interactive force uninstallation (skip confirmation prompts):*
+```bash
+sudo bash /opt/gravity-dns/scripts/uninstall.sh -y
+```
+
 The script will automatically:
 1. Detect your public IP and prompt for base domain and admin password.
 2. Install `redis-server`, build tools, and modern Go compiler.

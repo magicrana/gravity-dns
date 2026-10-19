@@ -9,6 +9,16 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Route uninstallation request
+if [ "${1:-}" = "uninstall" ] || [ "${1:-}" = "--uninstall" ]; then
+    shift
+    if [ -f "${SCRIPT_DIR}/scripts/uninstall.sh" ]; then
+        exec bash "${SCRIPT_DIR}/scripts/uninstall.sh" "$@"
+    else
+        exec bash <(curl -fsSL "https://raw.githubusercontent.com/magicrana/gravity-dns/main/scripts/uninstall.sh") "$@"
+    fi
+fi
+
 if [ -f "${SCRIPT_DIR}/scripts/install.sh" ]; then
     exec bash "${SCRIPT_DIR}/scripts/install.sh" "$@"
 else
