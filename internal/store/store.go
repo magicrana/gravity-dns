@@ -484,6 +484,57 @@ func GetDefaultStreamingPresets() []StreamingPreset {
 				"*.vrv.co",
 			},
 		},
+		{
+			ID:          "toffee",
+			Name:        "Toffee (Banglalink Live TV & Sports)",
+			Description: "Top Bangladeshi live sports, cricket and TV streaming",
+			Domains: []string{
+				"toffeelive.com",
+				"*.toffeelive.com",
+			},
+		},
+		{
+			ID:          "chorki",
+			Name:        "Chorki (BD Movies & Series)",
+			Description: "Bangladeshi premium OTT content and originals",
+			Domains: []string{
+				"chorki.com",
+				"*.chorki.com",
+			},
+		},
+		{
+			ID:          "hoichoi",
+			Name:        "Hoichoi (BD Catalog)",
+			Description: "Bengali movies, web series, and exclusive BD catalog",
+			Domains: []string{
+				"hoichoi.tv",
+				"*.hoichoi.tv",
+			},
+		},
+		{
+			ID:          "bioscope-bongo",
+			Name:        "Bioscope & Bongo BD",
+			Description: "Grameenphone Bioscope and Bongo entertainment portals",
+			Domains: []string{
+				"bioscopelive.com",
+				"*.bioscopelive.com",
+				"bongobd.com",
+				"*.bongobd.com",
+			},
+		},
+		{
+			ID:          "bd-sports-tv",
+			Name:        "T Sports, Rabbithole & JagoBD",
+			Description: "Live Bangladesh cricket matches, T Sports & Live TV channels",
+			Domains: []string{
+				"rabbitholebd.com",
+				"*.rabbitholebd.com",
+				"tsports.com",
+				"*.tsports.com",
+				"jagobd.com",
+				"*.jagobd.com",
+			},
+		},
 	}
 }
 
