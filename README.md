@@ -250,6 +250,13 @@ gravity all -config /etc/gravity/gravity.yaml
 gravity dns -config /etc/gravity/gravity.yaml
 gravity sniproxy -config /etc/gravity/gravity.yaml
 gravity panel -config /etc/gravity/gravity.yaml
+
+# Complete Uninstallation (Purge all files, services, configs, and ports)
+sudo gravity-uninstall
+# Or:
+# sudo bash /opt/gravity-dns/uninstall.sh
+# Or non-interactive force:
+# sudo gravity-uninstall -y
 ```
 
 ---

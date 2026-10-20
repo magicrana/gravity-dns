@@ -471,6 +471,13 @@ if [ -d "${SOURCE_DIR:-/opt/gravity-dns}/scripts" ]; then
 fi
 chmod +x /opt/gravity-dns/scripts/*.sh 2>/dev/null || true
 
+# Install convenient uninstaller command in PATH and repo root
+if [ -f /opt/gravity-dns/scripts/uninstall.sh ]; then
+    cp -f /opt/gravity-dns/scripts/uninstall.sh /usr/local/bin/gravity-uninstall
+    chmod +x /usr/local/bin/gravity-uninstall
+    ln -sf /opt/gravity-dns/scripts/uninstall.sh /opt/gravity-dns/uninstall.sh
+fi
+
 echo -e "\n${BOLD}=== Step 8: Firewall Configuration (UFW) ===${NC}"
 if command -v ufw &>/dev/null; then
     ufw status | grep -q "Status: active" && {
@@ -523,6 +530,7 @@ if [ "$IS_REINSTALL" = "true" ]; then
     echo -e "    - Logs:     ${BOLD}journalctl -u gravity.service -f${NC}"
     echo -e "    - Restart:  ${BOLD}systemctl restart gravity.service${NC}"
     echo -e "    - Config:   ${BOLD}/etc/gravity/gravity.yaml${NC}"
+    echo -e "    - Uninstall:${BOLD}sudo gravity-uninstall${NC} (or bash /opt/gravity-dns/uninstall.sh)"
     echo -e ""
     echo -e "  WireGuard VPN Tunnel (SIP / VoIP / UDP):"
     echo -e "    - Setup Tool: ${BOLD}sudo bash /opt/gravity-dns/scripts/setup-wireguard.sh${NC}"
@@ -546,6 +554,7 @@ else
     echo -e "    - Logs:     ${BOLD}journalctl -u gravity.service -f${NC}"
     echo -e "    - Restart:  ${BOLD}systemctl restart gravity.service${NC}"
     echo -e "    - Config:   ${BOLD}/etc/gravity/gravity.yaml${NC}"
+    echo -e "    - Uninstall:${BOLD}sudo gravity-uninstall${NC} (or bash /opt/gravity-dns/uninstall.sh)"
     echo -e ""
     echo -e "  WireGuard VPN Tunnel (SIP / VoIP / UDP):"
     echo -e "    - Setup Tool: ${BOLD}sudo bash /opt/gravity-dns/scripts/setup-wireguard.sh${NC}"
