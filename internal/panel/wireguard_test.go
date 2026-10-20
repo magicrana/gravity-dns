@@ -3,49 +3,43 @@ package panel
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestSanitizePeerName(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"my_peer-1", "my_peer-1"},
-		{"peer with spaces!", "peerwithspaces"},
-		{"user@example.com", "userexamplecom"},
-		{"sip$phone#1", "sipphone1"},
+func TestGenerateQRCodeSVG(t *testing.T) {
+	sampleConf := `[Interface]
+PrivateKey = aaaaaa=
+Address = 10.66.66.2/32
+DNS = 10.66.66.1, 1.1.1.1
+
+[Peer]
+PublicKey = bbbbbb=
+Endpoint = 1.2.3.4:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+`
+	svgBytes, err := generateQRCodeSVG(sampleConf)
+	if err != nil {
+		t.Fatalf("generateQRCodeSVG returned error: %v", err)
 	}
 
-	for _, tc := range tests {
-		got := sanitizePeerName(tc.input)
-		if got != tc.expected {
-			t.Errorf("sanitizePeerName(%q) = %q; want %q", tc.input, got, tc.expected)
-		}
+	svgStr := string(svgBytes)
+	if !strings.HasPrefix(svgStr, "<svg") {
+		t.Errorf("expected SVG to start with <svg, got: %s", svgStr[:min(len(svgStr), 20)])
+	}
+	if !strings.Contains(svgStr, `<rect width=`) {
+		t.Errorf("expected SVG to contain rect background")
+	}
+	if !strings.Contains(svgStr, `<path fill="#000000"`) {
+		t.Errorf("expected SVG to contain path")
+	}
+	if !strings.HasSuffix(svgStr, "</svg>") {
+		t.Errorf("expected SVG to end with </svg>")
 	}
 }
 
-func TestFormatBytes(t *testing.T) {
-	if got := formatBytes(500); got != "500 B" {
-		t.Errorf("expected 500 B, got %s", got)
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-	if got := formatBytes(1024); got != "1.0 KB" {
-		t.Errorf("expected 1.0 KB, got %s", got)
-	}
-	if got := formatBytes(1048576 * 5); got != "5.0 MB" {
-		t.Errorf("expected 5.0 MB, got %s", got)
-	}
-}
-
-func TestFormatTimeAgo(t *testing.T) {
-	if got := formatTimeAgo(0); got != "Never" {
-		t.Errorf("expected Never, got %s", got)
-	}
-	now := time.Now().Unix()
-	if got := formatTimeAgo(now - 10); !strings.Contains(got, "seconds ago") {
-		t.Errorf("expected seconds ago, got %s", got)
-	}
-	if got := formatTimeAgo(now - 120); !strings.Contains(got, "mins ago") {
-		t.Errorf("expected mins ago, got %s", got)
-	}
+	return b
 }

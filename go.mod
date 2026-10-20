@@ -10,6 +10,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/miekg/dns v1.1.73 // indirect
 	github.com/redis/go-redis/v9 v9.23.0 // indirect
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.60.0 // indirect

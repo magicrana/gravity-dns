@@ -1,8 +1,10 @@
 package panel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/skip2/go-qrcode"
 	"gravity-dns/internal/config"
 	"gravity-dns/internal/store"
 )
@@ -86,6 +89,57 @@ func formatTimeAgo(ts int64) string {
 		return fmt.Sprintf("%d hours ago", diff/3600)
 	}
 	return fmt.Sprintf("%d days ago", diff/86400)
+}
+
+// generateQRCodeSVG generates a vector SVG QR code from text content.
+func generateQRCodeSVG(content string) ([]byte, error) {
+	qr, err := qrcode.New(content, qrcode.Medium)
+	if err != nil {
+		return nil, err
+	}
+
+	bitmap := qr.Bitmap()
+	size := len(bitmap)
+	if size == 0 {
+		return nil, errors.New("empty qr code bitmap")
+	}
+
+	scale := 8
+	border := 4
+	totalSize := (size + border*2) * scale
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="100%%" height="100%%" shape-rendering="crispEdges">`, totalSize, totalSize))
+	sb.WriteString(fmt.Sprintf(`<rect width="%d" height="%d" fill="#ffffff"/>`, totalSize, totalSize))
+	sb.WriteString(`<path fill="#000000" d="`)
+
+	for y, row := range bitmap {
+		for x, val := range row {
+			if val {
+				vx := (x + border) * scale
+				vy := (y + border) * scale
+				sb.WriteString(fmt.Sprintf("M%d,%dh%dv%dh-%dz ", vx, vy, scale, scale, scale))
+			}
+		}
+	}
+	sb.WriteString(`"/></svg>`)
+
+	return []byte(sb.String()), nil
+}
+
+// extractTunnelIP extracts the clean IPv4 address (stripping any /32 or /24 CIDR suffix) from a .conf string.
+func extractTunnelIP(conf string) string {
+	for _, l := range strings.Split(conf, "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "Address") {
+			parts := strings.SplitN(l, "=", 2)
+			if len(parts) == 2 {
+				val := strings.TrimSpace(parts[1])
+				return strings.Split(val, "/")[0]
+			}
+		}
+	}
+	return ""
 }
 
 // sanitizePeerName keeps only safe alphanumeric, dash, and underscore characters.
@@ -181,9 +235,14 @@ func (h *APIHandler) getWireGuardStatus(ctx context.Context) WGStatusResponse {
 			}
 		}
 
+		cleanIP := strings.TrimSpace(clientIP)
+		if idx := strings.Index(cleanIP, "/"); idx != -1 {
+			cleanIP = cleanIP[:idx]
+		}
+
 		info := &WGPeerInfo{
 			Name:       baseName,
-			TunnelIP:   clientIP,
+			TunnelIP:   cleanIP,
 			PublicKey:  clientPub,
 			AllowedIPs: clientIP,
 		}
@@ -359,6 +418,7 @@ func (h *APIHandler) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Re
 			"success":    true,
 			"name":       clientName,
 			"user_token": userToken,
+			"tunnel_ip":  extractTunnelIP(string(confData)),
 			"conf":       string(confData),
 			"qr_svg_url": fmt.Sprintf("/api/wireguard/peers/%s/qr.svg", clientName),
 			"reused":     true,
@@ -444,12 +504,13 @@ PersistentKeepalive = 25
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success":    true,
-		"name":       clientName,
-		"user_token": userToken,
-		"tunnel_ip":  clientIP + "/32",
-		"conf":       clientConf,
-		"qr_svg_url": fmt.Sprintf("/api/wireguard/peers/%s/qr.svg", clientName),
+		"success":     true,
+		"name":        clientName,
+		"user_token":  userToken,
+		"tunnel_ip":   clientIP,
+		"allowed_ips": clientIP + "/32",
+		"conf":        clientConf,
+		"qr_svg_url":  fmt.Sprintf("/api/wireguard/peers/%s/qr.svg", clientName),
 	})
 }
 
@@ -466,6 +527,7 @@ func (h *APIHandler) handleGetWireGuardPeer(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"name":       name,
+		"tunnel_ip":  extractTunnelIP(string(data)),
 		"conf":       string(data),
 		"qr_svg_url": fmt.Sprintf("/api/wireguard/peers/%s/qr.svg", name),
 	})
@@ -476,21 +538,24 @@ func (h *APIHandler) handleGetWireGuardQRCode(w http.ResponseWriter, r *http.Req
 	name := sanitizePeerName(chi.URLParam(r, "name"))
 	clientConfPath := filepath.Join(wgClientsDir, name+".conf")
 
-	if _, err := os.Stat(clientConfPath); err != nil {
-		http.Error(w, "peer config not found", http.StatusNotFound)
-		return
-	}
-
-	// Ensure qrencode is available
-	if _, err := exec.LookPath("qrencode"); err != nil {
-		_ = exec.Command("apt-get", "install", "-y", "--no-install-recommends", "qrencode").Run()
-	}
-
-	cmd := exec.Command("qrencode", "-t", "SVG", "-o", "-", clientConfPath)
-	svgOut, err := cmd.Output()
+	data, err := os.ReadFile(clientConfPath)
 	if err != nil {
-		http.Error(w, "failed to generate QR code: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "peer config not found: "+err.Error(), http.StatusNotFound)
 		return
+	}
+
+	// 1. Try pure Go SVG generator first (encodes full .conf text directly without external dependencies)
+	svgOut, qErr := generateQRCodeSVG(string(data))
+	if qErr != nil {
+		// 2. Fallback to qrencode CLI reading from stdin
+		cmd := exec.Command("qrencode", "-t", "SVG", "-o", "-")
+		cmd.Stdin = bytes.NewReader(data)
+		out, cmdErr := cmd.Output()
+		if cmdErr != nil {
+			http.Error(w, "failed to generate QR code: "+qErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		svgOut = out
 	}
 
 	w.Header().Set("Content-Type", "image/svg+xml")
@@ -580,6 +645,7 @@ func (h *APIHandler) handleGetUserWireGuard(w http.ResponseWriter, r *http.Reque
 		"peer_name":  user.WGPeer,
 		"user_token": token,
 		"username":   user.Username,
+		"tunnel_ip":  extractTunnelIP(string(data)),
 		"conf":       string(data),
 		"qr_svg_url": fmt.Sprintf("/api/wireguard/peers/%s/qr.svg", user.WGPeer),
 	})

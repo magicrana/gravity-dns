@@ -2694,7 +2694,7 @@
                         <div class="text-[10px] text-slate-500 code-font cursor-pointer hover:text-slate-300 mt-0.5" onclick="navigator.clipboard.writeText('${escapeHtml(p.public_key)}'); showToast('Public key copied!');" title="Click to copy public key">${escapeHtml(pubKeyShort)}</div>
                     </td>
                     <td class="py-3.5 px-4">${userBadge}</td>
-                    <td class="py-3.5 px-4 font-semibold text-emerald-400 code-font text-xs">${escapeHtml(p.tunnel_ip || '-')}</td>
+                    <td class="py-3.5 px-4 font-semibold text-emerald-400 code-font text-xs">${escapeHtml((p.tunnel_ip || '-').replace(/\/32$/, ''))}</td>
                     <td class="py-3.5 px-4">${handshakeBadge}</td>
                     <td class="py-3.5 px-4 text-xs">
                         <span class="text-emerald-400 font-medium">↓ ${escapeHtml(p.transfer_rx_human || '0 B')}</span>
@@ -2814,9 +2814,9 @@
                 const data = await res.json();
                 document.getElementById('wg-qr-modal-name').textContent = data.name;
 
-                // Extract IP from conf if present
-                let ipMatch = data.conf.match(/Address\s*=\s*([0-9\.\/]+)/);
-                const assignedIP = ipMatch ? ipMatch[1] : '10.66.66.x';
+                // Extract clean IP without /32
+                let ipMatch = data.conf ? data.conf.match(/Address\s*=\s*([0-9\.]+)/) : null;
+                const assignedIP = (data.tunnel_ip || (ipMatch ? ipMatch[1] : '10.66.66.x')).replace(/\/32$/, '');
                 document.getElementById('wg-qr-modal-ip').textContent = assignedIP;
 
                 let endpointMatch = data.conf.match(/Endpoint\s*=\s*([^\r\n]+)/);
