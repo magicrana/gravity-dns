@@ -122,14 +122,28 @@ init_server() {
     mkdir -p "$WG_DIR" "$CLIENTS_DIR"
     chmod 700 "$WG_DIR" "$CLIENTS_DIR"
 
-    if [ ! -f "${WG_DIR}/server_private.key" ]; then
+    # 1. Unify Server Private Key: Check wg0.conf first, then server_private.key, or generate fresh
+    local server_priv=""
+    if [ -f "$WG_CONF" ]; then
+        server_priv=$(grep -E '^[[:space:]]*PrivateKey' "$WG_CONF" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*PrivateKey[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' | tr -d '[:space:]')
+    fi
+    if [ -z "$server_priv" ] && [ -f "${WG_DIR}/server_private.key" ]; then
+        server_priv=$(tr -d '[:space:]' < "${WG_DIR}/server_private.key")
+    fi
+    if [ -z "$server_priv" ]; then
         echo -e "${CYAN}Generating WireGuard Server Cryptographic Keys...${NC}"
-        wg genkey | tee "${WG_DIR}/server_private.key" | wg pubkey > "${WG_DIR}/server_public.key"
-        chmod 600 "${WG_DIR}/server_private.key"
+        server_priv=$(wg genkey)
     fi
 
-    local server_priv
-    server_priv=$(cat "${WG_DIR}/server_private.key")
+    # Derive server public key from private key
+    local server_pub
+    server_pub=$(echo "$server_priv" | wg pubkey)
+
+    # Persist both keys so disk files are 100% consistent
+    echo "$server_priv" > "${WG_DIR}/server_private.key"
+    chmod 600 "${WG_DIR}/server_private.key"
+    echo "$server_pub" > "${WG_DIR}/server_public.key"
+    chmod 644 "${WG_DIR}/server_public.key"
 
     local post_up="iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -I FORWARD 2 -o wg0 -j ACCEPT; iptables -t nat -I POSTROUTING 1 -s ${WG_SUBNET}.0/24 ! -o wg0 -j MASQUERADE; iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
     local post_down="iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o wg0 -j ACCEPT 2>/dev/null || true; iptables -t nat -D POSTROUTING -s ${WG_SUBNET}.0/24 ! -o wg0 -j MASQUERADE 2>/dev/null || true; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true"
@@ -149,33 +163,41 @@ PostDown = ${post_down}
 EOF
         chmod 600 "$WG_CONF"
     else
-        # Auto-heal existing wg0.conf if it contains outdated rules (e.g. DNAT or -A FORWARD)
-        if grep -q "DNAT" "$WG_CONF" 2>/dev/null || ! grep -q "! -o wg0" "$WG_CONF" 2>/dev/null || ! grep -q "FORWARD 1" "$WG_CONF" 2>/dev/null || grep -q "RELATED,ESTABLISHED" "$WG_CONF" 2>/dev/null; then
-            local tmp_conf="${WG_CONF}.tmp.$$"
-            while IFS= read -r line || [ -n "$line" ]; do
-                if [[ "$line" =~ ^[[:space:]]*PostUp[[:space:]]*= ]]; then
-                    echo "PostUp = ${post_up}"
-                elif [[ "$line" =~ ^[[:space:]]*PostDown[[:space:]]*= ]]; then
-                    echo "PostDown = ${post_down}"
-                else
-                    echo "$line"
-                fi
-            done < "$WG_CONF" > "$tmp_conf"
-            mv -f "$tmp_conf" "$WG_CONF"
-            chmod 600 "$WG_CONF"
-        fi
+        # Auto-heal existing wg0.conf: synchronize PrivateKey, PostUp, and PostDown
+        local tmp_conf="${WG_CONF}.tmp.$$"
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [[ "$line" =~ ^[[:space:]]*PostUp[[:space:]]*= ]]; then
+                echo "PostUp = ${post_up}"
+            elif [[ "$line" =~ ^[[:space:]]*PostDown[[:space:]]*= ]]; then
+                echo "PostDown = ${post_down}"
+            elif [[ "$line" =~ ^[[:space:]]*PrivateKey[[:space:]]*= ]]; then
+                echo "PrivateKey = ${server_priv}"
+            else
+                echo "$line"
+            fi
+        done < "$WG_CONF" > "$tmp_conf"
+        mv -f "$tmp_conf" "$WG_CONF"
+        chmod 600 "$WG_CONF"
     fi
 
     # Enable and start service
     systemctl enable wg-quick@wg0 >/dev/null 2>&1 || true
     systemctl restart wg-quick@wg0 || systemctl start wg-quick@wg0 || true
+
+    # Live verify actual public key loaded in running kernel interface
+    local live_pub
+    live_pub=$(wg show wg0 public-key 2>/dev/null || true)
+    if [ -n "$live_pub" ]; then
+        echo "$live_pub" > "${WG_DIR}/server_public.key"
+    fi
+
     echo -e "${GREEN}[OK] WireGuard server running on UDP port ${WG_PORT}.${NC}"
 }
 
 # Sync all client configurations in /etc/wireguard/clients/*.conf into server wg0.conf and live kernel table
 sync_clients() {
     local server_pub
-    server_pub=$(cat "${WG_DIR}/server_public.key" 2>/dev/null || true)
+    server_pub=$(wg show wg0 public-key 2>/dev/null || tr -d '[:space:]' < "${WG_DIR}/server_public.key" 2>/dev/null || true)
     local pub_ip
     pub_ip=$(get_public_ip)
     local count=0
@@ -212,10 +234,9 @@ EOF
         # 2. Live register peer directly into running kernel wg0 table
         wg set wg0 peer "$cpub" allowed-ips "${clean_ip}/32" 2>/dev/null || true
 
-        # 3. Repair client conf file if PublicKey is empty or MTU is missing
+        # 3. ALWAYS rewrite client conf file with the server's exact live public key & settings
         if [ -n "$server_pub" ] && [ -n "$pub_ip" ]; then
-            if grep -q "PublicKey = *$" "$cf" 2>/dev/null || ! grep -q "PublicKey =" "$cf" 2>/dev/null || ! grep -q "MTU =" "$cf" 2>/dev/null; then
-                cat > "$cf" << EOF
+            cat > "$cf" << EOF
 [Interface]
 PrivateKey = ${cpriv}
 Address = ${clean_ip}/32
@@ -228,8 +249,7 @@ Endpoint = ${pub_ip}:${WG_PORT}
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
-                chmod 600 "$cf"
-            fi
+            chmod 600 "$cf"
         fi
         count=$((count + 1))
     done
@@ -345,6 +365,20 @@ show_client() {
     echo -e "${CYAN}------------------------------------------------------------------------${NC}"
     cat "$conf_file"
     echo -e "${CYAN}------------------------------------------------------------------------${NC}\n"
+    local live_server_pub
+    live_server_pub=$(wg show wg0 public-key 2>/dev/null || tr -d '[:space:]' < "${WG_DIR}/server_public.key" 2>/dev/null || echo "UNKNOWN")
+    local client_peer_pub
+    client_peer_pub=$(grep -E '^[[:space:]]*PublicKey' "$conf_file" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*//' | tr -d '[:space:]')
+
+    echo -e "${BOLD}Cryptographic Key Alignment Check:${NC}"
+    echo -e "  Live Server Public Key:    ${BOLD}${live_server_pub}${NC}"
+    echo -e "  Client [Peer] Public Key:  ${BOLD}${client_peer_pub}${NC}"
+    if [ "$live_server_pub" = "$client_peer_pub" ]; then
+        echo -e "  Status:                    ${GREEN}[OK] Keys Match 100%! Handshake will succeed.${NC}\n"
+    else
+        echo -e "  Status:                    ${RED}[MISMATCH] Keys do not match! Please re-run init.${NC}\n"
+    fi
+
     echo -e "${YELLOW}VoIP / SIP Trunk Setup Tip:${NC}"
     echo "  1. If setting up on Android/iOS: Open WireGuard app -> '+' -> Scan QR Code."
     echo "  2. If using with Asterisk/FreePBX/PC: Import or copy ${conf_file}."

@@ -97,6 +97,20 @@ PersistentKeepalive = 25
 	if patched2 != patched {
 		t.Errorf("expected second pass to return identical content")
 	}
+
+	// Test updating mismatched/stale server public key
+	staleKey := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	confWithStaleKey := strings.Replace(patched, serverPub, staleKey, 1)
+	repaired, changed3 := patchMissingServerPubKey(confWithStaleKey, serverPub)
+	if !changed3 {
+		t.Errorf("expected changed=true when repairing stale server public key")
+	}
+	if !strings.Contains(repaired, "PublicKey = "+serverPub) {
+		t.Errorf("expected repaired config to have new server public key")
+	}
+	if strings.Contains(repaired, staleKey) {
+		t.Errorf("expected stale key to be completely removed")
+	}
 }
 
 func TestGenerateKeypairAndDerive(t *testing.T) {

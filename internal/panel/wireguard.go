@@ -214,20 +214,39 @@ func derivePublicKey(privBase64 string) (string, error) {
 	return base64.StdEncoding.EncodeToString(pubKey[:]), nil
 }
 
-// getServerPublicKey returns the WireGuard server public key, ensuring keys exist on disk.
+// getServerPublicKey returns the WireGuard server public key, ensuring keys exist on disk and match wg0.conf.
 func getServerPublicKey() (string, error) {
 	serverPubPath := filepath.Join(wgDir, "server_public.key")
 	serverPrivPath := filepath.Join(wgDir, "server_private.key")
 
-	// 1. Check if server_public.key exists and has valid content
-	if data, err := os.ReadFile(serverPubPath); err == nil {
-		pub := strings.TrimSpace(string(data))
+	// 1. If wg0 interface is live in kernel, query directly from wg
+	if out, err := exec.Command("wg", "show", "wg0", "public-key").Output(); err == nil {
+		pub := strings.TrimSpace(string(out))
 		if pub != "" {
+			_ = os.WriteFile(serverPubPath, []byte(pub+"\n"), 0644)
 			return pub, nil
 		}
 	}
 
-	// 2. Check if server_private.key exists to derive public key
+	// 2. Check if wg0.conf exists and derive directly from its PrivateKey (the source of truth for wg-quick)
+	if confData, err := os.ReadFile(wgConfFile); err == nil {
+		for _, line := range strings.Split(string(confData), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "PrivateKey") {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					priv := strings.TrimSpace(parts[1])
+					if pub, pErr := derivePublicKey(priv); pErr == nil && pub != "" {
+						_ = os.WriteFile(serverPrivPath, []byte(priv+"\n"), 0600)
+						_ = os.WriteFile(serverPubPath, []byte(pub+"\n"), 0644)
+						return pub, nil
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Check if server_private.key exists to derive public key
 	if data, err := os.ReadFile(serverPrivPath); err == nil {
 		priv := strings.TrimSpace(string(data))
 		if priv != "" {
@@ -238,7 +257,15 @@ func getServerPublicKey() (string, error) {
 		}
 	}
 
-	// 3. Generate a brand new server keypair if missing
+	// 4. Check if server_public.key exists and has valid content
+	if data, err := os.ReadFile(serverPubPath); err == nil {
+		pub := strings.TrimSpace(string(data))
+		if pub != "" {
+			return pub, nil
+		}
+	}
+
+	// 5. Generate a brand new server keypair if missing
 	_ = os.MkdirAll(wgDir, 0700)
 	priv, pub, err := generateKeypair()
 	if err != nil {
@@ -367,15 +394,24 @@ func syncAllWireGuardPeers() {
 	}
 }
 
-// patchMissingServerPubKey repairs client configurations where PublicKey was left empty or MTU is missing.
+// patchMissingServerPubKey repairs client configurations so PublicKey matches serverPub and MTU is present.
 func patchMissingServerPubKey(conf string, serverPub string) (string, bool) {
 	changed := false
 	serverPub = strings.TrimSpace(serverPub)
 	if serverPub != "" {
-		re := regexp.MustCompile(`(?m)^([ \t]*PublicKey[ \t]*=[ \t]*)$`)
+		re := regexp.MustCompile(`(?m)^([ \t]*PublicKey[ \t]*=).*$`)
 		if re.MatchString(conf) {
-			conf = re.ReplaceAllString(conf, fmt.Sprintf("PublicKey = %s", serverPub))
-			changed = true
+			newConf := re.ReplaceAllString(conf, fmt.Sprintf("PublicKey = %s", serverPub))
+			if newConf != conf {
+				conf = newConf
+				changed = true
+			}
+		} else {
+			rePeer := regexp.MustCompile(`(?m)^(\[Peer\][ \t]*)$`)
+			if rePeer.MatchString(conf) {
+				conf = rePeer.ReplaceAllString(conf, fmt.Sprintf("[Peer]\nPublicKey = %s", serverPub))
+				changed = true
+			}
 		}
 	}
 	if !strings.Contains(conf, "MTU =") && !strings.Contains(conf, "MTU=") {
