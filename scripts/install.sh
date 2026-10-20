@@ -480,6 +480,12 @@ fi
 
 echo -e "\n${BOLD}=== Step 8: Firewall Configuration (UFW) ===${NC}"
 if command -v ufw &>/dev/null; then
+    # Ensure UFW allows packet forwarding for VPN
+    if [ -f /etc/default/ufw ]; then
+        sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+        ufw reload >/dev/null 2>&1 || true
+    fi
+
     ufw status | grep -q "Status: active" && {
         echo "Configuring UFW rules..."
         ufw allow 853/tcp comment "GravityDNS DoT" >/dev/null 2>&1 || true
@@ -493,6 +499,13 @@ if command -v ufw &>/dev/null; then
         ufw allow 51820/udp comment "WireGuard VPN Tunnel" >/dev/null 2>&1 || true
         echo -e "${GREEN}Firewall rules configured for ports 853, 8443, 443, 80, ${PANEL_PORT}, 51820(UDP).${NC}"
     } || echo "UFW is not active, skipping firewall rule injection."
+
+    # Pre-inject WireGuard NAT masquerade & routing
+    iptables -t nat -C POSTROUTING -s 10.66.66.0/24 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -j MASQUERADE
+    iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -j ACCEPT
+    iptables -C FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    iptables -t nat -C PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53
 fi
 
 # Start GravityDNS service
