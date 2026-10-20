@@ -294,7 +294,77 @@ PostDown = %s
 			_ = exec.Command("bash", "-c", "wg syncconf wg0 <(wg-quick strip wg0) 2>/dev/null || systemctl restart wg-quick@wg0 || true").Run()
 		}
 	}
+	syncAllWireGuardPeers()
 	return nil
+}
+
+// syncAllWireGuardPeers ensures all client configurations on disk are active in wg0.conf and kernel wg0 table.
+func syncAllWireGuardPeers() {
+	clientFiles, _ := filepath.Glob(filepath.Join(wgClientsDir, "*.conf"))
+	if len(clientFiles) == 0 {
+		return
+	}
+
+	wgData, _ := os.ReadFile(wgConfFile)
+	wgConfStr := string(wgData)
+	var peersToAppend strings.Builder
+
+	for _, cf := range clientFiles {
+		cname := strings.TrimSuffix(filepath.Base(cf), ".conf")
+		confStr, rErr := readAndRepairClientConf(cname)
+		if rErr != nil {
+			continue
+		}
+
+		lines := strings.Split(confStr, "\n")
+		var clientPriv, clientIP string
+		for _, l := range lines {
+			l = strings.TrimSpace(l)
+			if strings.HasPrefix(l, "PrivateKey") {
+				parts := strings.SplitN(l, "=", 2)
+				if len(parts) == 2 {
+					clientPriv = strings.TrimSpace(parts[1])
+				}
+			} else if strings.HasPrefix(l, "Address") {
+				parts := strings.SplitN(l, "=", 2)
+				if len(parts) == 2 {
+					clientIP = strings.TrimSpace(parts[1])
+				}
+			}
+		}
+
+		if clientPriv == "" {
+			continue
+		}
+		clientPub, pErr := derivePublicKey(clientPriv)
+		if pErr != nil || clientPub == "" {
+			continue
+		}
+		cleanIP := strings.TrimSpace(clientIP)
+		if idx := strings.Index(cleanIP, "/"); idx != -1 {
+			cleanIP = cleanIP[:idx]
+		}
+		if cleanIP == "" {
+			continue
+		}
+
+		// 1. Ensure peer exists in wg0.conf
+		if !strings.Contains(wgConfStr, clientPub) {
+			peerBlock := fmt.Sprintf("\n# Client: %s\n[Peer]\nPublicKey = %s\nAllowedIPs = %s/32\n", cname, clientPub, cleanIP)
+			peersToAppend.WriteString(peerBlock)
+			wgConfStr += peerBlock
+		}
+
+		// 2. Register peer directly in live kernel wg0 table
+		_ = exec.Command("wg", "set", "wg0", "peer", clientPub, "allowed-ips", cleanIP+"/32").Run()
+	}
+
+	if peersToAppend.Len() > 0 {
+		if f, fErr := os.OpenFile(wgConfFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600); fErr == nil {
+			_, _ = f.WriteString(peersToAppend.String())
+			f.Close()
+		}
+	}
 }
 
 // patchMissingServerPubKey repairs client configurations where PublicKey was left empty or MTU is missing.
@@ -530,7 +600,7 @@ func ensureWireGuardRouting() {
 	_ = exec.Command("iptables", "-t", "nat", "-D", "PREROUTING", "-i", "wg0", "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "1.1.1.1:53").Run()
 	_ = exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", "10.66.66.0/24", "-j", "MASQUERADE").Run()
 	_ = exec.Command("iptables", "-D", "FORWARD", "-i", "wg0", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-D", "FORWARD", "-o", "wg0", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-D", "FORWARD", "-o", "wg0", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-t", "mangle", "-D", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu").Run()
 	_ = exec.Command("iptables", "-D", "INPUT", "-p", "udp", "--dport", "51820", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", "10.66.66.0/24", "!", "-o", "wg0", "-j", "MASQUERADE").Run()
@@ -538,7 +608,7 @@ func ensureWireGuardRouting() {
 	// Insert rules at TOP of chains (ahead of ufw-reject-forward)
 	_ = exec.Command("iptables", "-I", "INPUT", "1", "-p", "udp", "--dport", "51820", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-I", "FORWARD", "1", "-i", "wg0", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-I", "FORWARD", "2", "-o", "wg0", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-I", "FORWARD", "2", "-o", "wg0", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", "10.66.66.0/24", "!", "-o", "wg0", "-j", "MASQUERADE").Run()
 	_ = exec.Command("iptables", "-t", "mangle", "-I", "FORWARD", "1", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu").Run()
 }
@@ -637,6 +707,8 @@ func (h *APIHandler) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Re
 		if userToken != "" {
 			_ = h.store.SetUserWGPeer(r.Context(), userToken, clientName)
 		}
+		// Ensure all peers (including this one) are registered into live wg0 kernel table
+		syncAllWireGuardPeers()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success":    true,
 			"name":       clientName,
