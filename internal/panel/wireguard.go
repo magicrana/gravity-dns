@@ -290,12 +290,32 @@ func ensureServerWireGuardConfig() error {
 	serverPrivPath := filepath.Join(wgDir, "server_private.key")
 	privData, _ := os.ReadFile(serverPrivPath)
 	serverPriv := strings.TrimSpace(string(privData))
+	if serverPriv == "" {
+		return errors.New("server private key is empty")
+	}
 
-	desiredPostUp := "iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -I FORWARD 2 -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -I POSTROUTING 1 -s 10.66.66.0/24 ! -o wg0 -j MASQUERADE; iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
-	desiredPostDown := "iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED 2>/dev/null || true; iptables -t nat -D POSTROUTING -s 10.66.66.0/24 ! -o wg0 -j MASQUERADE 2>/dev/null || true; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true"
+	desiredPostUp := "iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -I FORWARD 2 -o wg0 -j ACCEPT; iptables -t nat -I POSTROUTING 1 -s 10.66.66.0/24 ! -o wg0 -j MASQUERADE; iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+	desiredPostDown := "iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o wg0 -j ACCEPT 2>/dev/null || true; iptables -t nat -D POSTROUTING -s 10.66.66.0/24 ! -o wg0 -j MASQUERADE 2>/dev/null || true; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true"
 
-	if _, err := os.Stat(wgConfFile); os.IsNotExist(err) && serverPriv != "" {
-		confContent := fmt.Sprintf(`[Interface]
+	confData, readErr := os.ReadFile(wgConfFile)
+	confStr := string(confData)
+
+	needsRebuild := readErr != nil ||
+		!strings.Contains(confStr, "[Interface]") ||
+		!strings.Contains(confStr, "PrivateKey") ||
+		!strings.Contains(confStr, "Address") ||
+		!strings.Contains(confStr, "! -o wg0") ||
+		strings.Contains(confStr, "DNAT") ||
+		strings.Contains(confStr, "RELATED,ESTABLISHED")
+
+	if needsRebuild {
+		var peersBuilder strings.Builder
+		if pIdx := strings.Index(confStr, "[Peer]"); pIdx != -1 {
+			peersBuilder.WriteString(strings.TrimSpace(confStr[pIdx:]))
+			peersBuilder.WriteString("\n")
+		}
+
+		newConf := fmt.Sprintf(`[Interface]
 Address = %s/24
 ListenPort = %d
 PrivateKey = %s
@@ -304,23 +324,14 @@ SaveConfig = false
 # NAT firewall, MSS clamping & internet forwarding rules
 PostUp = %s
 PostDown = %s
-`, wgServerIP, wgPort, serverPriv, desiredPostUp, desiredPostDown)
 
-		_ = os.WriteFile(wgConfFile, []byte(confContent), 0600)
+%s`, wgServerIP, wgPort, serverPriv, desiredPostUp, desiredPostDown, peersBuilder.String())
+
+		_ = os.WriteFile(wgConfFile, []byte(newConf), 0600)
 		_ = exec.Command("systemctl", "enable", "wg-quick@wg0").Run()
 		_ = exec.Command("systemctl", "restart", "wg-quick@wg0").Run()
-	} else if data, err := os.ReadFile(wgConfFile); err == nil {
-		// Update existing wg0.conf if it contains outdated/broken rules (e.g. DNAT or -A FORWARD)
-		confStr := string(data)
-		if strings.Contains(confStr, "DNAT") || !strings.Contains(confStr, "! -o wg0") || !strings.Contains(confStr, "-I FORWARD 1") {
-			rePostUp := regexp.MustCompile(`(?m)^PostUp[ \t]*=.*$`)
-			rePostDown := regexp.MustCompile(`(?m)^PostDown[ \t]*=.*$`)
-			confStr = rePostUp.ReplaceAllString(confStr, "PostUp = "+desiredPostUp)
-			confStr = rePostDown.ReplaceAllString(confStr, "PostDown = "+desiredPostDown)
-			_ = os.WriteFile(wgConfFile, []byte(confStr), 0600)
-			_ = exec.Command("bash", "-c", "wg syncconf wg0 <(wg-quick strip wg0) 2>/dev/null || systemctl restart wg-quick@wg0 || true").Run()
-		}
 	}
+
 	syncAllWireGuardPeers()
 	return nil
 }
@@ -809,6 +820,7 @@ PersistentKeepalive = 25
 	ensureWireGuardRouting()
 	_ = exec.Command("wg", "set", "wg0", "peer", clientPub, "allowed-ips", clientIP+"/32").Run()
 	_ = exec.Command("bash", "-c", "wg syncconf wg0 <(wg-quick strip wg0) 2>/dev/null || systemctl restart wg-quick@wg0 || true").Run()
+	syncAllWireGuardPeers()
 
 	// 8. Associate with User in Redis
 	if userToken != "" {
