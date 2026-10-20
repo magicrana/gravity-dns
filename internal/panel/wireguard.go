@@ -1,11 +1,13 @@
 package panel
 
 import (
-	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/skip2/go-qrcode"
+	"golang.org/x/crypto/curve25519"
 	"gravity-dns/internal/config"
 	"gravity-dns/internal/store"
 )
@@ -152,6 +155,166 @@ func sanitizePeerName(s string) string {
 	return res
 }
 
+// generateKeypair generates a WireGuard-compatible Curve25519 keypair in base64.
+// Tries `wg genkey` CLI first, and falls back to pure Go Curve25519 if wg CLI is not available.
+func generateKeypair() (privBase64 string, pubBase64 string, err error) {
+	if _, lErr := exec.LookPath("wg"); lErr == nil {
+		privOut, privErr := exec.Command("wg", "genkey").Output()
+		if privErr == nil {
+			privStr := strings.TrimSpace(string(privOut))
+			pubCmd := exec.Command("wg", "pubkey")
+			pubCmd.Stdin = strings.NewReader(privStr)
+			if pubOut, pubErr := pubCmd.Output(); pubErr == nil {
+				return privStr, strings.TrimSpace(string(pubOut)), nil
+			}
+		}
+	}
+
+	var privKey, pubKey [32]byte
+	if _, err := io.ReadFull(rand.Reader, privKey[:]); err != nil {
+		return "", "", err
+	}
+	privKey[0] &= 248
+	privKey[31] &= 127
+	privKey[31] |= 64
+
+	curve25519.ScalarBaseMult(&pubKey, &privKey)
+	return base64.StdEncoding.EncodeToString(privKey[:]), base64.StdEncoding.EncodeToString(pubKey[:]), nil
+}
+
+// derivePublicKey derives the WireGuard Curve25519 public key from a base64 private key.
+func derivePublicKey(privBase64 string) (string, error) {
+	privBase64 = strings.TrimSpace(privBase64)
+	if privBase64 == "" {
+		return "", errors.New("empty private key")
+	}
+
+	if _, lErr := exec.LookPath("wg"); lErr == nil {
+		cmd := exec.Command("wg", "pubkey")
+		cmd.Stdin = strings.NewReader(privBase64)
+		if pubOut, pubErr := cmd.Output(); pubErr == nil {
+			pub := strings.TrimSpace(string(pubOut))
+			if pub != "" {
+				return pub, nil
+			}
+		}
+	}
+
+	privBytes, err := base64.StdEncoding.DecodeString(privBase64)
+	if err != nil || len(privBytes) != 32 {
+		return "", errors.New("invalid private key base64")
+	}
+	var privKey, pubKey [32]byte
+	copy(privKey[:], privBytes)
+	privKey[0] &= 248
+	privKey[31] &= 127
+	privKey[31] |= 64
+
+	curve25519.ScalarBaseMult(&pubKey, &privKey)
+	return base64.StdEncoding.EncodeToString(pubKey[:]), nil
+}
+
+// getServerPublicKey returns the WireGuard server public key, ensuring keys exist on disk.
+func getServerPublicKey() (string, error) {
+	serverPubPath := filepath.Join(wgDir, "server_public.key")
+	serverPrivPath := filepath.Join(wgDir, "server_private.key")
+
+	// 1. Check if server_public.key exists and has valid content
+	if data, err := os.ReadFile(serverPubPath); err == nil {
+		pub := strings.TrimSpace(string(data))
+		if pub != "" {
+			return pub, nil
+		}
+	}
+
+	// 2. Check if server_private.key exists to derive public key
+	if data, err := os.ReadFile(serverPrivPath); err == nil {
+		priv := strings.TrimSpace(string(data))
+		if priv != "" {
+			if pub, err := derivePublicKey(priv); err == nil && pub != "" {
+				_ = os.WriteFile(serverPubPath, []byte(pub+"\n"), 0644)
+				return pub, nil
+			}
+		}
+	}
+
+	// 3. Generate a brand new server keypair if missing
+	_ = os.MkdirAll(wgDir, 0700)
+	priv, pub, err := generateKeypair()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate server keypair: %w", err)
+	}
+
+	_ = os.WriteFile(serverPrivPath, []byte(priv+"\n"), 0600)
+	_ = os.WriteFile(serverPubPath, []byte(pub+"\n"), 0644)
+	return pub, nil
+}
+
+// ensureServerWireGuardConfig ensures /etc/wireguard directory, keys, and wg0.conf exist.
+func ensureServerWireGuardConfig() error {
+	_ = os.MkdirAll(wgDir, 0700)
+	_ = os.MkdirAll(wgClientsDir, 0700)
+
+	_, err := getServerPublicKey()
+	if err != nil {
+		return err
+	}
+
+	serverPrivPath := filepath.Join(wgDir, "server_private.key")
+	privData, _ := os.ReadFile(serverPrivPath)
+	serverPriv := strings.TrimSpace(string(privData))
+
+	if _, err := os.Stat(wgConfFile); os.IsNotExist(err) && serverPriv != "" {
+		confContent := fmt.Sprintf(`[Interface]
+Address = %s/24
+ListenPort = %d
+PrivateKey = %s
+SaveConfig = false
+
+# NAT firewall, MSS clamping & DNS forwarding rules
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s %s.0/24 -j MASQUERADE; iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu; iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53; iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s %s.0/24 -j MASQUERADE; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu; iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53; iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
+`, wgServerIP, wgPort, serverPriv, wgSubnetBase, wgSubnetBase)
+
+		_ = os.WriteFile(wgConfFile, []byte(confContent), 0600)
+		_ = exec.Command("systemctl", "enable", "wg-quick@wg0").Run()
+		_ = exec.Command("systemctl", "restart", "wg-quick@wg0").Run()
+	}
+	return nil
+}
+
+// patchMissingServerPubKey repairs client configurations where PublicKey was left empty.
+func patchMissingServerPubKey(conf string, serverPub string) (string, bool) {
+	serverPub = strings.TrimSpace(serverPub)
+	if serverPub == "" {
+		return conf, false
+	}
+	re := regexp.MustCompile(`(?m)^([ \t]*PublicKey[ \t]*=[ \t]*)$`)
+	if re.MatchString(conf) {
+		newConf := re.ReplaceAllString(conf, fmt.Sprintf("PublicKey = %s", serverPub))
+		return newConf, true
+	}
+	return conf, false
+}
+
+// readAndRepairClientConf reads a client .conf file and auto-repairs missing server public keys.
+func readAndRepairClientConf(name string) (string, error) {
+	clientConfPath := filepath.Join(wgClientsDir, name+".conf")
+	data, err := os.ReadFile(clientConfPath)
+	if err != nil {
+		return "", err
+	}
+	confStr := string(data)
+	if serverPub, err := getServerPublicKey(); err == nil && serverPub != "" {
+		if patched, changed := patchMissingServerPubKey(confStr, serverPub); changed {
+			confStr = patched
+			_ = os.WriteFile(clientConfPath, []byte(patched), 0600)
+		}
+	}
+	return confStr, nil
+}
+
+
 // getWireGuardStatus inspects wg0 status, live peers, and configured client files.
 func (h *APIHandler) getWireGuardStatus(ctx context.Context) WGStatusResponse {
 	resp := WGStatusResponse{
@@ -171,10 +334,9 @@ func (h *APIHandler) getWireGuardStatus(ctx context.Context) WGStatusResponse {
 	}
 	resp.Installed = true
 
-	// 2. Check if server_public.key exists
-	pubKeyPath := filepath.Join(wgDir, "server_public.key")
-	if data, err := os.ReadFile(pubKeyPath); err == nil {
-		resp.ServerPubKey = strings.TrimSpace(string(data))
+	// 2. Fetch or generate server public key
+	if pub, err := getServerPublicKey(); err == nil && pub != "" {
+		resp.ServerPubKey = pub
 	}
 
 	// 3. Check if wg0 is active
@@ -203,7 +365,15 @@ func (h *APIHandler) getWireGuardStatus(ctx context.Context) WGStatusResponse {
 		if rErr != nil {
 			continue
 		}
-		lines := strings.Split(string(content), "\n")
+		confStr := string(content)
+		if resp.ServerPubKey != "" {
+			if patched, changed := patchMissingServerPubKey(confStr, resp.ServerPubKey); changed {
+				confStr = patched
+				_ = os.WriteFile(cf, []byte(patched), 0600)
+			}
+		}
+
+		lines := strings.Split(confStr, "\n")
 		var clientPriv, clientIP, serverPub string
 		for _, l := range lines {
 			l = strings.TrimSpace(l)
@@ -228,10 +398,8 @@ func (h *APIHandler) getWireGuardStatus(ctx context.Context) WGStatusResponse {
 		// Calculate client public key from private key
 		clientPub := ""
 		if clientPriv != "" {
-			cmd := exec.Command("wg", "pubkey")
-			cmd.Stdin = strings.NewReader(clientPriv)
-			if pOut, pErr := cmd.Output(); pErr == nil {
-				clientPub = strings.TrimSpace(string(pOut))
+			if pub, err := derivePublicKey(clientPriv); err == nil {
+				clientPub = pub
 			}
 		}
 
@@ -341,6 +509,8 @@ func ensureWireGuardRouting() {
 
 // handleInitWireGuard handles POST /api/wireguard/init
 func (h *APIHandler) handleInitWireGuard(w http.ResponseWriter, r *http.Request) {
+	_ = ensureServerWireGuardConfig()
+
 	scriptPath := "/opt/gravity-dns/scripts/setup-wireguard.sh"
 	if _, err := os.Stat(scriptPath); err != nil {
 		scriptPath = config.AbsolutePath("scripts/setup-wireguard.sh")
@@ -426,8 +596,8 @@ func (h *APIHandler) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Re
 	_ = os.MkdirAll(wgClientsDir, 0700)
 	clientConfPath := filepath.Join(wgClientsDir, clientName+".conf")
 
-	// If already exists, return existing configuration
-	if confData, err := os.ReadFile(clientConfPath); err == nil {
+	// If already exists, return existing configuration (with self-healing if server public key was missing)
+	if confStr, err := readAndRepairClientConf(clientName); err == nil {
 		if userToken != "" {
 			_ = h.store.SetUserWGPeer(r.Context(), userToken, clientName)
 		}
@@ -435,49 +605,27 @@ func (h *APIHandler) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Re
 			"success":    true,
 			"name":       clientName,
 			"user_token": userToken,
-			"tunnel_ip":  extractTunnelIP(string(confData)),
-			"conf":       string(confData),
+			"tunnel_ip":  extractTunnelIP(confStr),
+			"conf":       confStr,
 			"qr_svg_url": fmt.Sprintf("/api/wireguard/peers/%s/qr.svg", clientName),
 			"reused":     true,
 		})
 		return
 	}
 
-	// 1. Generate client private and public keys
-	privCmd := exec.Command("wg", "genkey")
-	privOut, privErr := privCmd.Output()
-	if privErr != nil {
-		writeError(w, http.StatusInternalServerError, "failed to generate WireGuard private key: "+privErr.Error())
+	// 1. Generate client private and public keys (via wg genkey or Curve25519)
+	clientPriv, clientPub, keyErr := generateKeypair()
+	if keyErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate WireGuard client keys: "+keyErr.Error())
 		return
 	}
-	clientPriv := strings.TrimSpace(string(privOut))
 
-	pubCmd := exec.Command("wg", "pubkey")
-	pubCmd.Stdin = strings.NewReader(clientPriv)
-	pubOut, pubErr := pubCmd.Output()
-	if pubErr != nil {
-		writeError(w, http.StatusInternalServerError, "failed to generate WireGuard public key: "+pubErr.Error())
+	// 2. Ensure server keys & wg0 config exist, then retrieve server public key
+	_ = ensureServerWireGuardConfig()
+	serverPub, sErr := getServerPublicKey()
+	if sErr != nil || serverPub == "" {
+		writeError(w, http.StatusInternalServerError, "failed to determine WireGuard server public key: "+sErr.Error())
 		return
-	}
-	clientPub := strings.TrimSpace(string(pubOut))
-
-	// 2. Read Server Public Key
-	serverPubPath := filepath.Join(wgDir, "server_public.key")
-	serverPubData, sErr := os.ReadFile(serverPubPath)
-	serverPub := ""
-	if sErr == nil {
-		serverPub = strings.TrimSpace(string(serverPubData))
-	}
-	if serverPub == "" {
-		// Try deriving from server_private.key
-		if serverPrivData, pErr := os.ReadFile(filepath.Join(wgDir, "server_private.key")); pErr == nil {
-			c := exec.Command("wg", "pubkey")
-			c.Stdin = strings.NewReader(strings.TrimSpace(string(serverPrivData)))
-			if out, oErr := c.Output(); oErr == nil {
-				serverPub = strings.TrimSpace(string(out))
-				_ = os.WriteFile(serverPubPath, []byte(serverPub), 0644)
-			}
-		}
 	}
 
 	// 3. Assign Next IP
@@ -536,9 +684,7 @@ PersistentKeepalive = 25
 // handleGetWireGuardPeer handles GET /api/wireguard/peers/{name}
 func (h *APIHandler) handleGetWireGuardPeer(w http.ResponseWriter, r *http.Request) {
 	name := sanitizePeerName(chi.URLParam(r, "name"))
-	clientConfPath := filepath.Join(wgClientsDir, name+".conf")
-
-	data, err := os.ReadFile(clientConfPath)
+	confStr, err := readAndRepairClientConf(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "client peer config not found")
 		return
@@ -546,8 +692,8 @@ func (h *APIHandler) handleGetWireGuardPeer(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"name":       name,
-		"tunnel_ip":  extractTunnelIP(string(data)),
-		"conf":       string(data),
+		"tunnel_ip":  extractTunnelIP(confStr),
+		"conf":       confStr,
 		"qr_svg_url": fmt.Sprintf("/api/wireguard/peers/%s/qr.svg", name),
 	})
 }
@@ -555,20 +701,18 @@ func (h *APIHandler) handleGetWireGuardPeer(w http.ResponseWriter, r *http.Reque
 // handleGetWireGuardQRCode handles GET /api/wireguard/peers/{name}/qr.svg
 func (h *APIHandler) handleGetWireGuardQRCode(w http.ResponseWriter, r *http.Request) {
 	name := sanitizePeerName(chi.URLParam(r, "name"))
-	clientConfPath := filepath.Join(wgClientsDir, name+".conf")
-
-	data, err := os.ReadFile(clientConfPath)
+	confStr, err := readAndRepairClientConf(name)
 	if err != nil {
 		http.Error(w, "peer config not found: "+err.Error(), http.StatusNotFound)
 		return
 	}
 
 	// 1. Try pure Go SVG generator first (encodes full .conf text directly without external dependencies)
-	svgOut, qErr := generateQRCodeSVG(string(data))
+	svgOut, qErr := generateQRCodeSVG(confStr)
 	if qErr != nil {
 		// 2. Fallback to qrencode CLI reading from stdin
 		cmd := exec.Command("qrencode", "-t", "SVG", "-o", "-")
-		cmd.Stdin = bytes.NewReader(data)
+		cmd.Stdin = strings.NewReader(confStr)
 		out, cmdErr := cmd.Output()
 		if cmdErr != nil {
 			http.Error(w, "failed to generate QR code: "+qErr.Error(), http.StatusInternalServerError)
@@ -586,19 +730,18 @@ func (h *APIHandler) handleGetWireGuardQRCode(w http.ResponseWriter, r *http.Req
 // handleDownloadWireGuardConf handles GET /api/wireguard/peers/{name}/download
 func (h *APIHandler) handleDownloadWireGuardConf(w http.ResponseWriter, r *http.Request) {
 	name := sanitizePeerName(chi.URLParam(r, "name"))
-	clientConfPath := filepath.Join(wgClientsDir, name+".conf")
-
-	data, err := os.ReadFile(clientConfPath)
+	confStr, err := readAndRepairClientConf(name)
 	if err != nil {
 		http.Error(w, "peer config file not found", http.StatusNotFound)
 		return
 	}
 
+	outBytes := []byte(confStr)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.conf\"", name))
 	w.Header().Set("Content-Type", "application/x-wireguard-profile")
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Content-Length", strconv.Itoa(len(outBytes)))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	_, _ = w.Write(outBytes)
 }
 
 // handleDeleteWireGuardPeer handles DELETE /api/wireguard/peers/{name}
@@ -646,8 +789,7 @@ func (h *APIHandler) handleGetUserWireGuard(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	clientConfPath := filepath.Join(wgClientsDir, user.WGPeer+".conf")
-	data, err := os.ReadFile(clientConfPath)
+	confStr, err := readAndRepairClientConf(user.WGPeer)
 	if err != nil {
 		// Clean stale association
 		_ = h.store.ClearUserWGPeer(r.Context(), token)
@@ -664,8 +806,9 @@ func (h *APIHandler) handleGetUserWireGuard(w http.ResponseWriter, r *http.Reque
 		"peer_name":  user.WGPeer,
 		"user_token": token,
 		"username":   user.Username,
-		"tunnel_ip":  extractTunnelIP(string(data)),
-		"conf":       string(data),
+		"tunnel_ip":  extractTunnelIP(confStr),
+		"conf":       confStr,
 		"qr_svg_url": fmt.Sprintf("/api/wireguard/peers/%s/qr.svg", user.WGPeer),
 	})
 }
+

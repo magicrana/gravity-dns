@@ -64,3 +64,56 @@ func TestComputeCurve25519PubKey(t *testing.T) {
 		t.Errorf("got %s, want %s", gotPub, expectedPub)
 	}
 }
+
+func TestPatchMissingServerPubKey(t *testing.T) {
+	userReportedConf := `[Interface]
+PrivateKey = iBwS5SzaQDSXnHmkq2Qar3tfb5EXlFoF+JbGmPwj5G4=
+Address = 10.66.66.2/32
+DNS = 1.1.1.1, 8.8.8.8
+
+[Peer]
+PublicKey = 
+Endpoint = 103.42.5.144:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+`
+	serverPub := "D8YtB5yaOPMEKROEcFElZJGNR9uifqufNN/xArOi920="
+	patched, changed := patchMissingServerPubKey(userReportedConf, serverPub)
+	if !changed {
+		t.Fatalf("expected changed to be true for missing server public key")
+	}
+	if !strings.Contains(patched, "PublicKey = "+serverPub) {
+		t.Fatalf("expected patched config to contain server public key, got:\n%s", patched)
+	}
+	if strings.Contains(patched, "PublicKey = \n") || strings.Contains(patched, "PublicKey = \r\n") {
+		t.Fatalf("patched config still contains empty PublicKey line")
+	}
+
+	// Idempotency: Running again should produce no changes
+	patched2, changed2 := patchMissingServerPubKey(patched, serverPub)
+	if changed2 {
+		t.Errorf("expected second pass to return changed=false")
+	}
+	if patched2 != patched {
+		t.Errorf("expected second pass to return identical content")
+	}
+}
+
+func TestGenerateKeypairAndDerive(t *testing.T) {
+	priv, pub, err := generateKeypair()
+	if err != nil {
+		t.Fatalf("generateKeypair error: %v", err)
+	}
+	if len(priv) != 44 || len(pub) != 44 {
+		t.Fatalf("expected 44-char base64 keys, got priv=%d pub=%d", len(priv), len(pub))
+	}
+
+	derivedPub, err := derivePublicKey(priv)
+	if err != nil {
+		t.Fatalf("derivePublicKey error: %v", err)
+	}
+	if derivedPub != pub {
+		t.Errorf("derived pub key mismatch: got %s, want %s", derivedPub, pub)
+	}
+}
+

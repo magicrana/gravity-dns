@@ -275,6 +275,12 @@ install_packages
 enable_forwarding
 init_server
 
+# Handle non-interactive initialization from installer or panel
+if [ "${1:-}" = "init" ]; then
+    echo -e "${GREEN}[OK] WireGuard initialized successfully.${NC}"
+    exit 0
+fi
+
 # Check if at least one client exists, if not prompt to create one immediately
 if [ ! -f "${CLIENTS_DIR}/sip-trunk.conf" ] && [ ! -f "${CLIENTS_DIR}/client1.conf" ]; then
     echo -e "\n${YELLOW}${BOLD}No client peers found. Creating your primary peer 'sip-trunk'...${NC}"

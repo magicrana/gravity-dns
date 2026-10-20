@@ -236,7 +236,7 @@ echo -e "\n${BOLD}=== Step 2: System Packages & Dependencies ===${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \
-    curl git build-essential ufw redis-server certbot python3-certbot-dns-cloudflare python3-pip ca-certificates openssl qrencode
+    curl git build-essential ufw redis-server certbot python3-certbot-dns-cloudflare python3-pip ca-certificates openssl qrencode wireguard wireguard-tools iptables
 pip3 install --upgrade --break-system-packages certbot certbot-dns-cloudflare "cloudflare>=2.3.1" >/dev/null 2>&1 || true
 
 # Ensure Redis is running and starts on boot
@@ -508,10 +508,20 @@ if command -v ufw &>/dev/null; then
     iptables -t nat -C PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53
 fi
 
+# Initialize WireGuard Server and Cryptographic Keys
+echo -e "\n${BOLD}=== Step 9: WireGuard Server & Cryptographic Keys Initialization ===${NC}"
+if [ -f /opt/gravity-dns/scripts/setup-wireguard.sh ]; then
+    echo "Initializing WireGuard server keys and wg0 interface..."
+    bash /opt/gravity-dns/scripts/setup-wireguard.sh init >/dev/null 2>&1 || true
+elif [ -f "${SOURCE_DIR}/scripts/setup-wireguard.sh" ]; then
+    echo "Initializing WireGuard server keys and wg0 interface..."
+    bash "${SOURCE_DIR}/scripts/setup-wireguard.sh" init >/dev/null 2>&1 || true
+fi
+
 # Start GravityDNS service
 systemctl restart gravity.service || true
 
-echo -e "\n${BOLD}=== Step 9: Wildcard TLS Certificate Reminder ===${NC}"
+echo -e "\n${BOLD}=== Step 10: Wildcard TLS Certificate Reminder ===${NC}"
 if [ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
     echo -e "${YELLOW}Notice: Wildcard certificate not yet found at /etc/letsencrypt/live/${DOMAIN}/${NC}"
     echo -e "GravityDNS uses fallback self-signed TLS while testing."
