@@ -481,21 +481,22 @@ func (h *APIHandler) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Re
 	clientConf := fmt.Sprintf(`[Interface]
 PrivateKey = %s
 Address = %s/32
-DNS = %s, 1.1.1.1
+DNS = 1.1.1.1, 8.8.8.8
 
 [Peer]
 PublicKey = %s
 Endpoint = %s
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
-`, clientPriv, clientIP, wgServerIP, serverPub, serverEndpoint)
+`, clientPriv, clientIP, serverPub, serverEndpoint)
 
 	if err := os.WriteFile(clientConfPath, []byte(clientConf), 0600); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save client configuration file: "+err.Error())
 		return
 	}
 
-	// 7. Live Sync Peers without dropping active connections
+	// 7. Live Sync: Directly register peer in running wg0 kernel table and update wg0.conf
+	_ = exec.Command("wg", "set", "wg0", "peer", clientPub, "allowed-ips", clientIP+"/32").Run()
 	_ = exec.Command("bash", "-c", "wg syncconf wg0 <(wg-quick strip wg0) 2>/dev/null || systemctl restart wg-quick@wg0 || true").Run()
 
 	// 8. Associate with User in Redis

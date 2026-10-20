@@ -1,8 +1,11 @@
 package panel
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/curve25519"
 )
 
 func TestGenerateQRCodeSVG(t *testing.T) {
@@ -42,4 +45,22 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestComputeCurve25519PubKey(t *testing.T) {
+	privBytes, err := base64.StdEncoding.DecodeString("qAiOIKO03rLAfV4s43i67e6f8ioGJCK9VL4E1IQogWA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var privKey, pubKey [32]byte
+	copy(privKey[:], privBytes)
+	privKey[0] &= 248
+	privKey[31] &= 127
+	privKey[31] |= 64
+	curve25519.ScalarBaseMult(&pubKey, &privKey)
+	expectedPub := "idcg0KhWMYe9PIEkc4yHbV85t4rIBe3MQSNDTs2GMQE="
+	gotPub := base64.StdEncoding.EncodeToString(pubKey[:])
+	if gotPub != expectedPub {
+		t.Errorf("got %s, want %s", gotPub, expectedPub)
+	}
 }
