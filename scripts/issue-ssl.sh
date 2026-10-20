@@ -75,7 +75,11 @@ case "$CHOICE" in
 
         echo -e "\n${CYAN}Requesting Wildcard Certificate from Let's Encrypt for ${DOMAIN} and *.${DOMAIN}...${NC}"
 
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        SCRIPT_DIR=""
+        if [ -n "${BASH_SOURCE[0]:-}" ]; then
+            SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+        fi
+        SCRIPT_DIR="${SCRIPT_DIR:-/opt/gravity-dns/scripts}"
         mkdir -p /etc/gravity /var/lib/gravity
         APEX_DOMAIN=$(echo "${DOMAIN}" | awk -F. '{if (NF>1) print $(NF-1)"."$NF; else print $0}')
         IS_GLOBAL=false

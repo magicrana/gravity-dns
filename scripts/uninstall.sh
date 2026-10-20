@@ -12,13 +12,20 @@ set -euo pipefail
 # copy script to /tmp and re-execute. This guarantees that deleting
 # /opt/gravity-dns will not truncate this script during execution or lock the CWD.
 # ------------------------------------------------------------------------------
-SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
-if [[ "$SELF_PATH" == /opt/gravity-dns/* ]] || [[ "$PWD" == /opt/gravity-dns* ]] || [[ "$SELF_PATH" == /etc/gravity/* ]]; then
-    TMP_EXEC="/tmp/gravity_uninstall_exec_$$.sh"
-    cp -f "$SELF_PATH" "$TMP_EXEC"
-    chmod +x "$TMP_EXEC"
-    cd /tmp
-    exec bash "$TMP_EXEC" "$@"
+SELF_SOURCE="${BASH_SOURCE[0]:-}"
+SELF_PATH=""
+if [ -n "$SELF_SOURCE" ]; then
+    SELF_PATH="$(readlink -f "$SELF_SOURCE" 2>/dev/null || echo "$SELF_SOURCE")"
+fi
+
+if [ -n "$SELF_PATH" ] && [ -f "$SELF_PATH" ]; then
+    if [[ "$SELF_PATH" == /opt/gravity-dns/* ]] || [[ "$SELF_PATH" == /etc/gravity/* ]]; then
+        TMP_EXEC="/tmp/gravity_uninstall_exec_$$.sh"
+        cp -f "$SELF_PATH" "$TMP_EXEC"
+        chmod +x "$TMP_EXEC"
+        cd /tmp
+        exec bash "$TMP_EXEC" "$@"
+    fi
 fi
 
 # Trap to remove any temporary execution script on exit

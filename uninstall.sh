@@ -11,10 +11,14 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+fi
+
 CACHE_BUSTER="$(date +%s)"
 
-if [ -f "${SCRIPT_DIR}/scripts/uninstall.sh" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/scripts/uninstall.sh" ]; then
     exec bash "${SCRIPT_DIR}/scripts/uninstall.sh" "$@"
 elif [ -f "/opt/gravity-dns/scripts/uninstall.sh" ]; then
     exec bash "/opt/gravity-dns/scripts/uninstall.sh" "$@"
