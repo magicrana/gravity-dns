@@ -150,8 +150,18 @@ EOF
     else
         # Auto-heal existing wg0.conf if it contains outdated rules (e.g. DNAT or -A FORWARD)
         if grep -q "DNAT" "$WG_CONF" 2>/dev/null || ! grep -q "! -o wg0" "$WG_CONF" 2>/dev/null || ! grep -q "FORWARD 1" "$WG_CONF" 2>/dev/null; then
-            sed -i "s|^PostUp =.*|PostUp = ${post_up}|" "$WG_CONF"
-            sed -i "s|^PostDown =.*|PostDown = ${post_down}|" "$WG_CONF"
+            local tmp_conf="${WG_CONF}.tmp.$$"
+            while IFS= read -r line || [ -n "$line" ]; do
+                if [[ "$line" =~ ^[[:space:]]*PostUp[[:space:]]*= ]]; then
+                    echo "PostUp = ${post_up}"
+                elif [[ "$line" =~ ^[[:space:]]*PostDown[[:space:]]*= ]]; then
+                    echo "PostDown = ${post_down}"
+                else
+                    echo "$line"
+                fi
+            done < "$WG_CONF" > "$tmp_conf"
+            mv -f "$tmp_conf" "$WG_CONF"
+            chmod 600 "$WG_CONF"
         fi
     fi
 
