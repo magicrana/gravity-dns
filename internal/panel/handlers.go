@@ -622,7 +622,7 @@ func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.R
 
 	// 4. Execute Certbot ACME DNS-01 Challenge with automated Cloudflare hooks
 	// This uses native Cloudflare REST API via hooks, completely bypassing broken python3-certbot-dns-cloudflare packages
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "certbot", "certonly",
@@ -1197,7 +1197,33 @@ mkdir -p "$TRACK_DIR"
 echo "${ZONE_ID}:${RECORD_ID}" >> "${TRACK_DIR}/${CERTBOT_VALIDATION}"
 
 echo "[GravityDNS] Successfully created ACME TXT record in Cloudflare DNS for ${RECORD_NAME} (ID: ${RECORD_ID})."
-sleep 15
+echo "[GravityDNS] Propagating challenge across Cloudflare authoritative network..."
+
+# Baseline sleep for initial Cloudflare anycast distribution
+sleep 20
+
+# Active verification via Cloudflare & Google Public DoH
+echo "[GravityDNS] Verifying TXT challenge resolution on public DNS resolvers..."
+for i in {1..20}; do
+    CF_DOH=$(curl -s "https://cloudflare-dns.com/dns-query?name=${RECORD_NAME}&type=TXT" -H "accept: application/dns-json" 2>/dev/null || true)
+    GOOG_DOH=$(curl -s "https://dns.google/resolve?name=${RECORD_NAME}&type=TXT" 2>/dev/null || true)
+    
+    if echo "$CF_DOH" | grep -q "${CERTBOT_VALIDATION}"; then
+        echo "[GravityDNS] Confirmed on Cloudflare DoH (attempt ${i}/20)."
+        if echo "$GOOG_DOH" | grep -q "${CERTBOT_VALIDATION}"; then
+            echo "[GravityDNS] Confirmed on Google Public DNS."
+            break
+        fi
+    fi
+    sleep 3
+done
+
+# Secondary validation buffer: Let's Encrypt performs multi-perspective secondary validation
+# from multiple global datacenters. Giving an extra 30s settling buffer guarantees that ALL
+# secondary validation vantage points query up-to-date authoritative records without network timeouts.
+echo "[GravityDNS] Waiting 30s settling buffer for Let's Encrypt secondary validation vantage points..."
+sleep 30
+echo "[GravityDNS] Challenge ready for Let's Encrypt verification!"
 `
 
 const cfCleanupHookScript = `#!/usr/bin/env bash

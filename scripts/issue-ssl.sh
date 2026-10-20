@@ -98,18 +98,34 @@ EOF
         CLEANUP_HOOK="${SCRIPT_DIR}/cf-cleanup-hook.sh"
         chmod +x "${AUTH_HOOK}" "${CLEANUP_HOOK}" 2>/dev/null || true
 
-        certbot certonly \
-            --manual \
-            --preferred-challenges dns \
-            --manual-auth-hook "${AUTH_HOOK}" \
-            --manual-cleanup-hook "${CLEANUP_HOOK}" \
-            --manual-public-ip-logging-ok \
-            -d "${DOMAIN}" \
-            -d "*.${DOMAIN}" \
-            --email "${CF_EMAIL}" \
-            --agree-tos \
-            --no-eff-email \
-            --non-interactive
+        ISSUE_OK=false
+        for attempt in 1 2; do
+            echo -e "\n${CYAN}Running Certbot ACME DNS-01 Challenge (Attempt ${attempt}/2)...${NC}"
+            if certbot certonly \
+                --manual \
+                --preferred-challenges dns \
+                --manual-auth-hook "${AUTH_HOOK}" \
+                --manual-cleanup-hook "${CLEANUP_HOOK}" \
+                --manual-public-ip-logging-ok \
+                -d "${DOMAIN}" \
+                -d "*.${DOMAIN}" \
+                --email "${CF_EMAIL}" \
+                --agree-tos \
+                --no-eff-email \
+                --non-interactive; then
+                ISSUE_OK=true
+                break
+            else
+                echo -e "\n${YELLOW}[WARNING] Attempt ${attempt} failed. Waiting 10 seconds before retry...${NC}"
+                sleep 10
+            fi
+        done
+
+        if [ "$ISSUE_OK" = "false" ]; then
+            echo -e "\n${RED}[ERROR] Automated Cloudflare certificate issuance failed after retries.${NC}"
+            echo -e "You can also use Option 2 (Manual DNS TXT Challenge) or the Web UI at Settings -> TLS Certificates."
+            exit 1
+        fi
         ;;
 
     2)
