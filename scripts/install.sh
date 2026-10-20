@@ -486,6 +486,15 @@ if command -v ufw &>/dev/null; then
         ufw reload >/dev/null 2>&1 || true
     fi
 
+    if [ -f /etc/ufw/sysctl.conf ]; then
+        sed -i 's|#net/ipv4/ip_forward=1|net/ipv4/ip_forward=1|' /etc/ufw/sysctl.conf
+        sed -i 's|#net/ipv6/conf/default/forwarding=1|net/ipv6/conf/default/forwarding=1|' /etc/ufw/sysctl.conf
+        sed -i 's|#net/ipv6/conf/all/forwarding=1|net/ipv6/conf/all/forwarding=1|' /etc/ufw/sysctl.conf
+    fi
+
+    ufw route allow in on wg0 >/dev/null 2>&1 || true
+    ufw route allow out on wg0 >/dev/null 2>&1 || true
+
     ufw status | grep -q "Status: active" && {
         echo "Configuring UFW rules..."
         ufw allow 853/tcp comment "GravityDNS DoT" >/dev/null 2>&1 || true
@@ -500,12 +509,22 @@ if command -v ufw &>/dev/null; then
         echo -e "${GREEN}Firewall rules configured for ports 853, 8443, 443, 80, ${PANEL_PORT}, 51820(UDP).${NC}"
     } || echo "UFW is not active, skipping firewall rule injection."
 
-    # Pre-inject WireGuard NAT masquerade & routing
-    iptables -t nat -C POSTROUTING -s 10.66.66.0/24 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -j MASQUERADE
-    iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -j ACCEPT
-    iptables -C FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    iptables -t nat -C PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53
+    # Flush old/conflicting rules
+    iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 10.66.66.0/24 -j MASQUERADE 2>/dev/null || true
+    iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED 2>/dev/null || true
+    iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    iptables -D INPUT -p udp --dport 51820 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 10.66.66.0/24 ! -o wg0 -j MASQUERADE 2>/dev/null || true
+
+    # Insert live WireGuard NAT masquerade & routing at top of chains
+    iptables -I INPUT 1 -p udp --dport 51820 -j ACCEPT 2>/dev/null || true
+    iptables -I FORWARD 1 -i wg0 -j ACCEPT 2>/dev/null || true
+    iptables -I FORWARD 2 -o wg0 -m state --state RELATED,ESTABLISHED 2>/dev/null || true
+    iptables -t nat -I POSTROUTING 1 -s 10.66.66.0/24 ! -o wg0 -j MASQUERADE 2>/dev/null || true
+    iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 fi
 
 # Initialize WireGuard Server and Cryptographic Keys

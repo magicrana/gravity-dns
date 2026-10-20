@@ -250,7 +250,7 @@ func getServerPublicKey() (string, error) {
 	return pub, nil
 }
 
-// ensureServerWireGuardConfig ensures /etc/wireguard directory, keys, and wg0.conf exist.
+// ensureServerWireGuardConfig ensures /etc/wireguard directory, keys, and wg0.conf exist with optimal forwarding rules.
 func ensureServerWireGuardConfig() error {
 	_ = os.MkdirAll(wgDir, 0700)
 	_ = os.MkdirAll(wgClientsDir, 0700)
@@ -264,6 +264,9 @@ func ensureServerWireGuardConfig() error {
 	privData, _ := os.ReadFile(serverPrivPath)
 	serverPriv := strings.TrimSpace(string(privData))
 
+	desiredPostUp := "iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -I FORWARD 2 -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -I POSTROUTING 1 -s 10.66.66.0/24 ! -o wg0 -j MASQUERADE; iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+	desiredPostDown := "iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED 2>/dev/null || true; iptables -t nat -D POSTROUTING -s 10.66.66.0/24 ! -o wg0 -j MASQUERADE 2>/dev/null || true; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true"
+
 	if _, err := os.Stat(wgConfFile); os.IsNotExist(err) && serverPriv != "" {
 		confContent := fmt.Sprintf(`[Interface]
 Address = %s/24
@@ -271,30 +274,48 @@ ListenPort = %d
 PrivateKey = %s
 SaveConfig = false
 
-# NAT firewall, MSS clamping & DNS forwarding rules
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s %s.0/24 -j MASQUERADE; iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu; iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53; iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s %s.0/24 -j MASQUERADE; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu; iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53; iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
-`, wgServerIP, wgPort, serverPriv, wgSubnetBase, wgSubnetBase)
+# NAT firewall, MSS clamping & internet forwarding rules
+PostUp = %s
+PostDown = %s
+`, wgServerIP, wgPort, serverPriv, desiredPostUp, desiredPostDown)
 
 		_ = os.WriteFile(wgConfFile, []byte(confContent), 0600)
 		_ = exec.Command("systemctl", "enable", "wg-quick@wg0").Run()
 		_ = exec.Command("systemctl", "restart", "wg-quick@wg0").Run()
+	} else if data, err := os.ReadFile(wgConfFile); err == nil {
+		// Update existing wg0.conf if it contains outdated/broken rules (e.g. DNAT or -A FORWARD)
+		confStr := string(data)
+		if strings.Contains(confStr, "DNAT") || !strings.Contains(confStr, "! -o wg0") || !strings.Contains(confStr, "-I FORWARD 1") {
+			rePostUp := regexp.MustCompile(`(?m)^PostUp[ \t]*=.*$`)
+			rePostDown := regexp.MustCompile(`(?m)^PostDown[ \t]*=.*$`)
+			confStr = rePostUp.ReplaceAllString(confStr, "PostUp = "+desiredPostUp)
+			confStr = rePostDown.ReplaceAllString(confStr, "PostDown = "+desiredPostDown)
+			_ = os.WriteFile(wgConfFile, []byte(confStr), 0600)
+			_ = exec.Command("bash", "-c", "wg syncconf wg0 <(wg-quick strip wg0) 2>/dev/null || systemctl restart wg-quick@wg0 || true").Run()
+		}
 	}
 	return nil
 }
 
-// patchMissingServerPubKey repairs client configurations where PublicKey was left empty.
+// patchMissingServerPubKey repairs client configurations where PublicKey was left empty or MTU is missing.
 func patchMissingServerPubKey(conf string, serverPub string) (string, bool) {
+	changed := false
 	serverPub = strings.TrimSpace(serverPub)
-	if serverPub == "" {
-		return conf, false
+	if serverPub != "" {
+		re := regexp.MustCompile(`(?m)^([ \t]*PublicKey[ \t]*=[ \t]*)$`)
+		if re.MatchString(conf) {
+			conf = re.ReplaceAllString(conf, fmt.Sprintf("PublicKey = %s", serverPub))
+			changed = true
+		}
 	}
-	re := regexp.MustCompile(`(?m)^([ \t]*PublicKey[ \t]*=[ \t]*)$`)
-	if re.MatchString(conf) {
-		newConf := re.ReplaceAllString(conf, fmt.Sprintf("PublicKey = %s", serverPub))
-		return newConf, true
+	if !strings.Contains(conf, "MTU =") && !strings.Contains(conf, "MTU=") {
+		reDNS := regexp.MustCompile(`(?m)^(DNS[ \t]*=.*)$`)
+		if reDNS.MatchString(conf) {
+			conf = reDNS.ReplaceAllString(conf, "$1\nMTU = 1420")
+			changed = true
+		}
 	}
-	return conf, false
+	return conf, changed
 }
 
 // readAndRepairClientConf reads a client .conf file and auto-repairs missing server public keys.
@@ -492,19 +513,34 @@ func (h *APIHandler) handleGetWireGuardStatus(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, st)
 }
 
-// ensureWireGuardRouting enables kernel IP forwarding, NAT masquerade, MSS clamping, and DNS redirection.
+// ensureWireGuardRouting enables kernel IP forwarding, rp_filter loose mode, UFW routing, and NAT masquerade.
 func ensureWireGuardRouting() {
 	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()
-	_ = exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "10.66.66.0/24", "-j", "MASQUERADE").Run()
-	_ = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "10.66.66.0/24", "-j", "MASQUERADE").Run()
-	_ = exec.Command("iptables", "-C", "FORWARD", "-i", "wg0", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-A", "FORWARD", "-i", "wg0", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-C", "FORWARD", "-o", "wg0", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-A", "FORWARD", "-o", "wg0", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-t", "mangle", "-C", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu").Run()
-	_ = exec.Command("iptables", "-t", "mangle", "-A", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu").Run()
-	_ = exec.Command("iptables", "-t", "nat", "-C", "PREROUTING", "-i", "wg0", "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "1.1.1.1:53").Run()
-	_ = exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-i", "wg0", "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "1.1.1.1:53").Run()
+	_ = exec.Command("sysctl", "-w", "net.ipv4.conf.all.forwarding=1").Run()
+	_ = exec.Command("sysctl", "-w", "net.ipv4.conf.all.rp_filter=2").Run()
+	_ = exec.Command("sysctl", "-w", "net.ipv4.conf.default.rp_filter=2").Run()
+
+	// Ensure UFW allows packet forwarding instead of dropping
+	_ = exec.Command("ufw", "route", "allow", "in", "on", "wg0").Run()
+	_ = exec.Command("ufw", "route", "allow", "out", "on", "wg0").Run()
+	_ = exec.Command("ufw", "allow", "51820/udp").Run()
+
+	// Flush old / conflicting rules
+	_ = exec.Command("iptables", "-t", "nat", "-D", "PREROUTING", "-i", "wg0", "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "1.1.1.1:53").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-D", "PREROUTING", "-i", "wg0", "-p", "tcp", "--dport", "53", "-j", "DNAT", "--to-destination", "1.1.1.1:53").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", "10.66.66.0/24", "-j", "MASQUERADE").Run()
+	_ = exec.Command("iptables", "-D", "FORWARD", "-i", "wg0", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-D", "FORWARD", "-o", "wg0", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-t", "mangle", "-D", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu").Run()
+	_ = exec.Command("iptables", "-D", "INPUT", "-p", "udp", "--dport", "51820", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", "10.66.66.0/24", "!", "-o", "wg0", "-j", "MASQUERADE").Run()
+
+	// Insert rules at TOP of chains (ahead of ufw-reject-forward)
+	_ = exec.Command("iptables", "-I", "INPUT", "1", "-p", "udp", "--dport", "51820", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-I", "FORWARD", "1", "-i", "wg0", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-I", "FORWARD", "2", "-o", "wg0", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", "10.66.66.0/24", "!", "-o", "wg0", "-j", "MASQUERADE").Run()
+	_ = exec.Command("iptables", "-t", "mangle", "-I", "FORWARD", "1", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu").Run()
 }
 
 // handleInitWireGuard handles POST /api/wireguard/init
@@ -516,7 +552,7 @@ func (h *APIHandler) handleInitWireGuard(w http.ResponseWriter, r *http.Request)
 		scriptPath = config.AbsolutePath("scripts/setup-wireguard.sh")
 	}
 
-	cmd := exec.Command("bash", scriptPath, "status")
+	cmd := exec.Command("bash", scriptPath, "init")
 	_ = cmd.Run()
 
 	ensureWireGuardRouting()
@@ -647,6 +683,7 @@ func (h *APIHandler) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Re
 PrivateKey = %s
 Address = %s/32
 DNS = 1.1.1.1, 8.8.8.8
+MTU = 1420
 
 [Peer]
 PublicKey = %s

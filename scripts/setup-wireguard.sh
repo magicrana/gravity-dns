@@ -66,25 +66,54 @@ enable_forwarding() {
     mkdir -p /etc/sysctl.d
     cat > /etc/sysctl.d/99-wireguard.conf << 'EOF'
 net.ipv4.ip_forward = 1
+net.ipv4.conf.all.forwarding = 1
+net.ipv4.conf.default.forwarding = 1
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
 net.ipv6.conf.all.forwarding = 1
+net.ipv6.conf.default.forwarding = 1
 EOF
-    sysctl --system >/dev/null 2>&1 || sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
+    sysctl --system >/dev/null 2>&1 || {
+        sysctl -w net.ipv4.ip_forward=1
+        sysctl -w net.ipv4.conf.all.forwarding=1
+        sysctl -w net.ipv4.conf.all.rp_filter=2
+        sysctl -w net.ipv4.conf.default.rp_filter=2
+    } >/dev/null 2>&1
 
     # Ensure UFW allows packet forwarding instead of silently dropping
     if [ -f /etc/default/ufw ]; then
         sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+    fi
+    if [ -f /etc/ufw/sysctl.conf ]; then
+        sed -i 's|#net/ipv4/ip_forward=1|net/ipv4/ip_forward=1|' /etc/ufw/sysctl.conf
+        sed -i 's|#net/ipv6/conf/default/forwarding=1|net/ipv6/conf/default/forwarding=1|' /etc/ufw/sysctl.conf
+        sed -i 's|#net/ipv6/conf/all/forwarding=1|net/ipv6/conf/all/forwarding=1|' /etc/ufw/sysctl.conf
+    fi
+    if command -v ufw &>/dev/null; then
+        ufw route allow in on wg0 >/dev/null 2>&1 || true
+        ufw route allow out on wg0 >/dev/null 2>&1 || true
+        ufw allow 51820/udp comment "WireGuard VPN Tunnel" >/dev/null 2>&1 || true
         ufw reload >/dev/null 2>&1 || true
     fi
 
-    # Live apply essential routing & MSS clamping to avoid fragmentation hangs
-    iptables -t nat -C POSTROUTING -s "${WG_SUBNET}.0/24" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s "${WG_SUBNET}.0/24" -j MASQUERADE
-    iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -j ACCEPT
-    iptables -C FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    iptables -t nat -C PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53
-    iptables -t nat -C PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
+    # Flush old/conflicting rules
+    iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s "${WG_SUBNET}.0/24" -j MASQUERADE 2>/dev/null || true
+    iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED 2>/dev/null || true
+    iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    iptables -D INPUT -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s "${WG_SUBNET}.0/24" ! -o wg0 -j MASQUERADE 2>/dev/null || true
 
-    echo -e "${GREEN}[OK] Packet forwarding and NAT routing enabled.${NC}"
+    # Insert live essential routing & MSS clamping at top of chains (ahead of ufw-reject-forward)
+    iptables -I INPUT 1 -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null || true
+    iptables -I FORWARD 1 -i wg0 -j ACCEPT 2>/dev/null || true
+    iptables -I FORWARD 2 -o wg0 -m state --state RELATED,ESTABLISHED 2>/dev/null || true
+    iptables -t nat -I POSTROUTING 1 -s "${WG_SUBNET}.0/24" ! -o wg0 -j MASQUERADE 2>/dev/null || true
+    iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+
+    echo -e "${GREEN}[OK] Packet forwarding, rp_filter, and NAT routing enabled.${NC}"
 }
 
 # Initialize WireGuard Server
@@ -100,8 +129,9 @@ init_server() {
 
     local server_priv
     server_priv=$(cat "${WG_DIR}/server_private.key")
-    local iface
-    iface=$(get_default_iface)
+
+    local post_up="iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -I FORWARD 2 -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -I POSTROUTING 1 -s ${WG_SUBNET}.0/24 ! -o wg0 -j MASQUERADE; iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+    local post_down="iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED 2>/dev/null || true; iptables -t nat -D POSTROUTING -s ${WG_SUBNET}.0/24 ! -o wg0 -j MASQUERADE 2>/dev/null || true; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true"
 
     if [ ! -f "$WG_CONF" ]; then
         echo -e "${CYAN}Creating Server Configuration (${WG_CONF})...${NC}"
@@ -112,11 +142,17 @@ ListenPort = ${WG_PORT}
 PrivateKey = ${server_priv}
 SaveConfig = false
 
-# NAT firewall, MSS clamping & DNS forwarding rules
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s ${WG_SUBNET}.0/24 -j MASQUERADE; iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu; iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53; iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s ${WG_SUBNET}.0/24 -j MASQUERADE; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu; iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53; iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
+# NAT firewall, MSS clamping & internet forwarding rules
+PostUp = ${post_up}
+PostDown = ${post_down}
 EOF
         chmod 600 "$WG_CONF"
+    else
+        # Auto-heal existing wg0.conf if it contains outdated rules (e.g. DNAT or -A FORWARD)
+        if grep -q "DNAT" "$WG_CONF" 2>/dev/null || ! grep -q "! -o wg0" "$WG_CONF" 2>/dev/null || ! grep -q "FORWARD 1" "$WG_CONF" 2>/dev/null; then
+            sed -i "s|^PostUp =.*|PostUp = ${post_up}|" "$WG_CONF"
+            sed -i "s|^PostDown =.*|PostDown = ${post_down}|" "$WG_CONF"
+        fi
     fi
 
     # Enable and start service
@@ -186,6 +222,7 @@ EOF
 PrivateKey = ${client_priv}
 Address = ${client_ip}/32
 DNS = 1.1.1.1, 8.8.8.8
+MTU = 1420
 
 [Peer]
 PublicKey = ${server_pub}
