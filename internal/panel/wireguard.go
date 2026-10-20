@@ -324,6 +324,21 @@ func (h *APIHandler) handleGetWireGuardStatus(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, st)
 }
 
+// ensureWireGuardRouting enables kernel IP forwarding, NAT masquerade, MSS clamping, and DNS redirection.
+func ensureWireGuardRouting() {
+	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "10.66.66.0/24", "-j", "MASQUERADE").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "10.66.66.0/24", "-j", "MASQUERADE").Run()
+	_ = exec.Command("iptables", "-C", "FORWARD", "-i", "wg0", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-A", "FORWARD", "-i", "wg0", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-C", "FORWARD", "-o", "wg0", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-A", "FORWARD", "-o", "wg0", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-t", "mangle", "-C", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu").Run()
+	_ = exec.Command("iptables", "-t", "mangle", "-A", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-C", "PREROUTING", "-i", "wg0", "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "1.1.1.1:53").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-i", "wg0", "-p", "udp", "--dport", "53", "-j", "DNAT", "--to-destination", "1.1.1.1:53").Run()
+}
+
 // handleInitWireGuard handles POST /api/wireguard/init
 func (h *APIHandler) handleInitWireGuard(w http.ResponseWriter, r *http.Request) {
 	scriptPath := "/opt/gravity-dns/scripts/setup-wireguard.sh"
@@ -333,6 +348,8 @@ func (h *APIHandler) handleInitWireGuard(w http.ResponseWriter, r *http.Request)
 
 	cmd := exec.Command("bash", scriptPath, "status")
 	_ = cmd.Run()
+
+	ensureWireGuardRouting()
 
 	// Ensure systemd service is active
 	_ = exec.Command("systemctl", "enable", "wg-quick@wg0").Run()
@@ -495,7 +512,8 @@ PersistentKeepalive = 25
 		return
 	}
 
-	// 7. Live Sync: Directly register peer in running wg0 kernel table and update wg0.conf
+	// 7. Live Sync: Directly register peer in running wg0 kernel table, ensure routing, and update wg0.conf
+	ensureWireGuardRouting()
 	_ = exec.Command("wg", "set", "wg0", "peer", clientPub, "allowed-ips", clientIP+"/32").Run()
 	_ = exec.Command("bash", "-c", "wg syncconf wg0 <(wg-quick strip wg0) 2>/dev/null || systemctl restart wg-quick@wg0 || true").Run()
 

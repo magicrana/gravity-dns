@@ -60,16 +60,31 @@ install_packages() {
     echo -e "${GREEN}[OK] WireGuard packages installed successfully.${NC}"
 }
 
-# Enable IPv4 forwarding
+# Enable IPv4 forwarding & UFW packet routing
 enable_forwarding() {
-    echo -e "${CYAN}Enabling kernel packet forwarding (sysctl)...${NC}"
+    echo -e "${CYAN}Enabling kernel packet forwarding (sysctl) & firewall routing...${NC}"
     mkdir -p /etc/sysctl.d
     cat > /etc/sysctl.d/99-wireguard.conf << 'EOF'
 net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
 EOF
     sysctl --system >/dev/null 2>&1 || sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
-    echo -e "${GREEN}[OK] Packet forwarding enabled.${NC}"
+
+    # Ensure UFW allows packet forwarding instead of silently dropping
+    if [ -f /etc/default/ufw ]; then
+        sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+        ufw reload >/dev/null 2>&1 || true
+    fi
+
+    # Live apply essential routing & MSS clamping to avoid fragmentation hangs
+    iptables -t nat -C POSTROUTING -s "${WG_SUBNET}.0/24" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s "${WG_SUBNET}.0/24" -j MASQUERADE
+    iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -j ACCEPT
+    iptables -C FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    iptables -t nat -C PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53
+    iptables -t nat -C PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53 2>/dev/null || iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
+
+    echo -e "${GREEN}[OK] Packet forwarding and NAT routing enabled.${NC}"
 }
 
 # Initialize WireGuard Server
@@ -97,9 +112,9 @@ ListenPort = ${WG_PORT}
 PrivateKey = ${server_priv}
 SaveConfig = false
 
-# NAT firewall forwarding rules
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o ${iface} -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o ${iface} -j MASQUERADE
+# NAT firewall, MSS clamping & DNS forwarding rules
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s ${WG_SUBNET}.0/24 -j MASQUERADE; iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu; iptables -t nat -A PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53; iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s ${WG_SUBNET}.0/24 -j MASQUERADE; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu; iptables -t nat -D PREROUTING -i wg0 -p udp --dport 53 -j DNAT --to-destination 1.1.1.1:53; iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 53 -j DNAT --to-destination 1.1.1.1:53
 EOF
         chmod 600 "$WG_CONF"
     fi
