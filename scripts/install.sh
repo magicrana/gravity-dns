@@ -362,6 +362,7 @@ EOF
         --preferred-challenges dns \
         --manual-auth-hook "${AUTH_HOOK}" \
         --manual-cleanup-hook "${CLEANUP_HOOK}" \
+        --manual-public-ip-logging-ok \
         -d "${DOMAIN}" \
         -d "*.${DOMAIN}" \
         --email "${CF_EMAIL}" \

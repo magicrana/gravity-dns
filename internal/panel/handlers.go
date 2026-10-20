@@ -630,6 +630,7 @@ func (h *APIHandler) handleAutoIssueCertificate(w http.ResponseWriter, r *http.R
 		"--preferred-challenges", "dns",
 		"--manual-auth-hook", authHook,
 		"--manual-cleanup-hook", cleanupHook,
+		"--manual-public-ip-logging-ok",
 		"-d", domain,
 		"-d", "*."+domain,
 		"--email", email,
