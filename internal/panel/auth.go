@@ -81,6 +81,15 @@ func AuthMiddleware(secret string) func(http.Handler) http.Handler {
 				}
 			}
 
+			// 3. Check Query parameter (?token= or ?auth_token=)
+			if tokenStr == "" {
+				if q := r.URL.Query().Get("token"); q != "" {
+					tokenStr = q
+				} else if q := r.URL.Query().Get("auth_token"); q != "" {
+					tokenStr = q
+				}
+			}
+
 			if tokenStr == "" {
 				if isAPIRequest(r) {
 					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)

@@ -138,6 +138,14 @@
                             <span id="badge-devices-count" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">0</span>
                         </button>
 
+                        <button onclick="switchTab('wireguard')" id="nav-wireguard" class="sidebar-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-darkhover hover:text-white transition">
+                            <div class="flex items-center gap-3">
+                                <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                                <span>WireGuard VPN</span>
+                            </div>
+                            <span id="badge-wireguard-count" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">0</span>
+                        </button>
+
                         <button onclick="switchTab('rules')" id="nav-rules" class="sidebar-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-darkhover hover:text-white transition">
                             <div class="flex items-center gap-3">
                                 <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
@@ -247,6 +255,10 @@
                         <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
                         DoH :8443
                     </span>
+                    <button onclick="switchTab('wireguard')" id="header-wg-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-medium hover:bg-indigo-500/20 transition cursor-pointer" title="WireGuard VPN Tunnel Gateway">
+                        <span id="header-wg-dot" class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
+                        WG :51820
+                    </button>
                 </div>
 
                 <div class="h-6 w-px bg-darkborder hidden sm:block"></div>
@@ -321,7 +333,7 @@
                 </div>
 
                 <!-- Quick Action Banners -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div onclick="switchTab('users'); openCreateUserModal();" class="glass-panel rounded-2xl p-5 border border-darkborder hover:border-indigo-500/50 cursor-pointer transition group">
                         <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition">
@@ -342,6 +354,18 @@
                             <div>
                                 <h4 class="text-sm font-bold text-white">Streaming Presets</h4>
                                 <p class="text-xs text-slate-400">Enable Netflix, Hulu, Disney+ in 1 tap</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div onclick="switchTab('wireguard');" class="glass-panel rounded-2xl p-5 border border-darkborder hover:border-emerald-500/50 cursor-pointer transition group">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-bold text-white">WireGuard VPN</h4>
+                                <p class="text-xs text-slate-400">QR codes & VoIP/UDP tunnels</p>
                             </div>
                         </div>
                     </div>
@@ -411,13 +435,14 @@
                                     <th class="py-3.5 px-4">Status</th>
                                     <th class="py-3.5 px-4">Device Quota (10m)</th>
                                     <th class="py-3.5 px-4">Expiration</th>
+                                    <th class="py-3.5 px-4">WireGuard VPN</th>
                                     <th class="py-3.5 px-4">Setup Endpoints</th>
                                     <th class="py-3.5 px-4 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="users-table-body" class="divide-y divide-darkborder">
                                 <tr>
-                                    <td colspan="6" class="text-center py-8 text-slate-500">Loading users...</td>
+                                    <td colspan="7" class="text-center py-8 text-slate-500">Loading users...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -453,6 +478,118 @@
                             <tbody id="devices-table-body" class="divide-y divide-darkborder">
                                 <tr>
                                     <td colspan="5" class="text-center py-8 text-slate-500">Loading active sessions...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB: WIREGUARD VPN ==================== -->
+            <section id="tab-wireguard" class="hidden space-y-6">
+                <!-- Header Banner -->
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                        <div class="flex items-center gap-2.5">
+                            <h2 class="text-xl font-bold text-white">WireGuard VPN Gateway</h2>
+                            <span id="wg-status-badge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                                <span id="wg-status-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                <span id="wg-status-text">Interface Active (wg0)</span>
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-1">High-performance UDP tunnel for VoIP, SIP trunks, mobile devices, and zero-leak SmartDNS routing.</p>
+                    </div>
+                    <div class="flex items-center gap-2.5">
+                        <button onclick="initWireGuardService()" id="btn-sync-wg" class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-darkcard border border-darkborder hover:bg-darkhover text-slate-300 hover:text-white text-xs font-semibold transition" title="Sync live configuration with kernel interface without dropping connections">
+                            <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                            Sync / Restart wg0
+                        </button>
+                        <button onclick="openCreateWGPeerModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            New WireGuard Peer
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Info Cards Grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="glass-panel rounded-2xl p-5 border border-darkborder">
+                        <div class="flex items-center justify-between text-slate-400 mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wider">Tunnel Subnet</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-bold">IPv4 CIDR</span>
+                        </div>
+                        <div class="text-2xl font-extrabold text-white code-font" id="wg-stat-subnet">10.66.66.0/24</div>
+                        <div class="mt-2 text-xs text-slate-400">
+                            Server Gateway: <span class="code-font text-indigo-300">10.66.66.1</span>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel rounded-2xl p-5 border border-darkborder">
+                        <div class="flex items-center justify-between text-slate-400 mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wider">Public Endpoint</span>
+                            <button onclick="copyElementText('wg-stat-endpoint')" class="text-slate-400 hover:text-white" title="Copy Public Endpoint">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
+                        <div class="text-xl font-bold text-white code-font truncate" id="wg-stat-endpoint">{{.PublicIPv4}}:51820</div>
+                        <div class="mt-2 text-xs text-slate-400">
+                            Port: <span class="text-emerald-400 font-medium">51820 UDP</span>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel rounded-2xl p-5 border border-darkborder">
+                        <div class="flex items-center justify-between text-slate-400 mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wider">DNS for Peers</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">SmartDNS</span>
+                        </div>
+                        <div class="text-2xl font-extrabold text-emerald-400 code-font">10.66.66.1</div>
+                        <div class="mt-2 text-xs text-slate-400">
+                            Fallback: <span class="code-font text-slate-300">1.1.1.1</span> &bull; Keepalive: 25s
+                        </div>
+                    </div>
+
+                    <div class="glass-panel rounded-2xl p-5 border border-darkborder">
+                        <div class="flex items-center justify-between text-slate-400 mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wider">Configured Peers</span>
+                            <div class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                            </div>
+                        </div>
+                        <div class="text-2xl font-extrabold text-white" id="wg-stat-peers-count">0</div>
+                        <div class="mt-2 text-xs text-slate-400 flex items-center gap-1.5 truncate">
+                            <span>Key:</span>
+                            <span id="wg-stat-pubkey-short" onclick="copyServerPubKey()" class="code-font text-indigo-300 cursor-pointer hover:underline truncate" title="Click to copy full Server Public Key">...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Peers Table Card -->
+                <div class="glass-panel rounded-2xl border border-darkborder overflow-hidden">
+                    <div class="p-4 border-b border-darkborder flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-darkpanel/40">
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-sm font-bold text-white">Configured Client Peers</h3>
+                            <span class="text-xs text-slate-500">(/etc/wireguard/clients/)</span>
+                        </div>
+                        <div class="w-full sm:w-64">
+                            <input type="text" id="wg-peers-filter" oninput="filterWireGuardPeers()" placeholder="Filter peer name or IP..."
+                                class="w-full px-3 py-1.5 bg-darkbg border border-darkborder rounded-xl text-white text-xs placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-darkpanel text-slate-400 text-xs uppercase tracking-wider border-b border-darkborder">
+                                <tr>
+                                    <th class="py-3.5 px-4">Peer Name</th>
+                                    <th class="py-3.5 px-4">Associated Client</th>
+                                    <th class="py-3.5 px-4">Tunnel IP</th>
+                                    <th class="py-3.5 px-4">Latest Handshake</th>
+                                    <th class="py-3.5 px-4">Data RX / TX</th>
+                                    <th class="py-3.5 px-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="wg-peers-table-body" class="divide-y divide-darkborder">
+                                <tr>
+                                    <td colspan="6" class="text-center py-8 text-slate-500">Loading WireGuard peers...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -876,19 +1013,20 @@
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300">
                             <div class="p-4 rounded-xl bg-darkbg border border-darkborder space-y-2">
-                                <span class="font-bold text-white block">Step 1: Run Server Provisioner</span>
-                                <p class="text-slate-400 leading-relaxed">SSH into your Bangladesh VPS and launch the automated WireGuard manager:</p>
-                                <div class="p-2.5 rounded-lg bg-black/60 border border-darkborder font-mono text-[11px] text-emerald-400 flex items-center justify-between">
-                                    <span>sudo bash /opt/gravity-dns/scripts/setup-wireguard.sh</span>
+                                <span class="font-bold text-white block">Step 1: Web UI Peer Management</span>
+                                <p class="text-slate-400 leading-relaxed">Create and manage peers directly from the panel without SSH:</p>
+                                <div class="flex gap-2 pt-1">
+                                    <button onclick="switchTab('wireguard')" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-600/30 transition">Open WireGuard Manager</button>
+                                    <button onclick="openCreateWGPeerModal()" class="px-3 py-1.5 rounded-lg bg-darkcard border border-darkborder hover:bg-darkhover text-slate-300 font-semibold text-xs transition">+ Add Peer</button>
                                 </div>
-                                <p class="text-[11px] text-slate-500">Auto-installs WireGuard, enables sysctl forwarding, sets NAT firewall rules, and creates peers.</p>
+                                <p class="text-[11px] text-slate-500 pt-1">Or use CLI provisioner: <code class="text-emerald-400 code-font">sudo bash /opt/gravity-dns/scripts/setup-wireguard.sh</code></p>
                             </div>
                             <div class="p-4 rounded-xl bg-darkbg border border-darkborder space-y-2">
                                 <span class="font-bold text-white block">Step 2: Connect Phone / PBX / Softphone</span>
                                 <ul class="space-y-1.5 list-disc list-inside text-slate-300">
-                                    <li><strong>Android / iOS:</strong> Scan the QR code displayed in terminal using the WireGuard app.</li>
-                                    <li><strong>Asterisk / FreePBX:</strong> Import the generated config from <code class="text-indigo-300 code-font">/etc/wireguard/clients/sip-trunk.conf</code>.</li>
-                                    <li><strong>Persistent Keepalive:</strong> Pre-set to 25s for reliable SIP NAT pinholes across Indian telecom carriers.</li>
+                                    <li><strong>Android / iOS:</strong> Scan the QR code displayed in the Web UI modal using the official WireGuard app.</li>
+                                    <li><strong>Asterisk / FreePBX / 3CX:</strong> Download the <code class="text-indigo-300 code-font">.conf</code> profile from the UI and place in <code class="text-indigo-300 code-font">/etc/wireguard/</code>.</li>
+                                    <li><strong>Persistent Keepalive:</strong> Pre-set to 25s for bulletproof NAT pinholes across international carrier networks.</li>
                                 </ul>
                             </div>
                         </div>
@@ -945,6 +1083,17 @@
                         class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
                 </div>
 
+                <div class="p-3 rounded-xl bg-darkbg border border-darkborder flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-semibold text-white block">WireGuard VPN Access</span>
+                        <span class="text-[11px] text-slate-400 block">Provision tunnel IP, keys & QR code</span>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="create-enable-wireguard" class="sr-only peer" checked>
+                        <div class="w-9 h-5 bg-darkpanel border border-darkborder peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                </div>
+
                 <div class="flex justify-end gap-2 pt-2">
                     <button type="button" onclick="closeModal('modal-create-user')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Cancel</button>
                     <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Create User</button>
@@ -998,6 +1147,20 @@
                             Download (DoH)
                         </a>
                     </div>
+                </div>
+
+                <div class="p-3.5 rounded-xl bg-darkbg border border-indigo-500/20 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-indigo-400 flex items-center gap-1.5">
+                            🛡️ WireGuard VPN Tunnel
+                        </span>
+                        <span id="setup-modal-wg-badge" class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">Checking...</span>
+                    </div>
+                    <p class="text-xs text-slate-400">Direct kernel tunnel for mobile devices, VoIP & UDP streams with built-in SmartDNS routing.</p>
+                    <button id="setup-modal-wg-btn" type="button" class="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold text-center transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                        <span>Show WireGuard QR Code & .conf</span>
+                    </button>
                 </div>
             </div>
 
@@ -1181,6 +1344,126 @@
         </div>
     </div>
 
+    <!-- MODAL: Create WireGuard Peer -->
+    <div id="modal-create-wg-peer" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-bold text-white">New WireGuard Peer</h3>
+                    <p class="text-xs text-slate-400">Generate crypto keys, assign a tunnel IP, and display QR code.</p>
+                </div>
+                <button onclick="closeModal('modal-create-wg-peer')" class="text-slate-400 hover:text-white text-xl">&times;</button>
+            </div>
+
+            <form id="form-create-wg-peer" onsubmit="handleCreateWGPeer(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Peer Name / Device Label</label>
+                    <input type="text" id="wg-new-peer-name" required placeholder="e.g. sip_phone, pbx_trunk, my_iphone"
+                        class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <p class="text-[11px] text-slate-500 mt-1">Alphanumeric, dash, or underscore characters only.</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-1.5">Associate with Client Account (Optional)</label>
+                    <select id="wg-new-peer-user" class="w-full px-3.5 py-2.5 bg-darkbg border border-darkborder rounded-xl text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="">-- Standalone / Infrastructure Peer --</option>
+                    </select>
+                    <p class="text-[11px] text-slate-500 mt-1">Linking ties this peer directly to the user's dashboard and quota.</p>
+                </div>
+
+                <div class="p-3.5 rounded-xl bg-darkbg border border-darkborder space-y-1.5">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-400">Assigned Subnet:</span>
+                        <span class="font-bold text-white code-font">10.66.66.0/24</span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-400">DNS Gateway:</span>
+                        <span class="font-bold text-emerald-400 code-font">10.66.66.1 (SmartDNS)</span>
+                    </div>
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-400">Persistent Keepalive:</span>
+                        <span class="font-bold text-slate-300 code-font">25 seconds</span>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal('modal-create-wg-peer')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Cancel</button>
+                    <button type="submit" id="btn-submit-create-wg-peer" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 flex items-center gap-1.5 shadow-lg shadow-indigo-600/30">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        <span>Generate & Show QR</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: WireGuard Peer QR Code & Setup Profile -->
+    <div id="modal-wg-qr" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-darkcard border border-darkborder rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl overflow-y-auto max-h-[92vh]">
+            <!-- Header -->
+            <div class="flex items-center justify-between border-b border-darkborder pb-4">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <h3 class="text-lg font-bold text-white">WireGuard Configuration</h3>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5">Peer: <strong id="wg-qr-modal-name" class="text-indigo-400 code-font"></strong> &bull; Tunnel IP: <span id="wg-qr-modal-ip" class="text-emerald-400 code-font"></span></p>
+                </div>
+                <button onclick="closeModal('modal-wg-qr')" class="text-slate-400 hover:text-white text-2xl font-light">&times;</button>
+            </div>
+
+            <!-- Crisp QR Display -->
+            <div class="flex flex-col items-center justify-center text-center space-y-3 py-2">
+                <div class="bg-white p-3 sm:p-4 rounded-2xl shadow-2xl border-4 border-white inline-block">
+                    <img id="wg-qr-image" src="" alt="WireGuard QR Code" class="w-56 h-56 sm:w-64 sm:h-64 object-contain mx-auto" />
+                </div>
+                <div class="space-y-1">
+                    <p class="text-xs font-semibold text-white flex items-center justify-center gap-1.5">
+                        <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                        Scan with WireGuard Mobile App
+                    </p>
+                    <p class="text-[11px] text-slate-400 max-w-sm">Open the WireGuard app on iOS or Android, tap <strong>+</strong>, choose <strong>Scan from QR code</strong>, and scan the image above.</p>
+                </div>
+            </div>
+
+            <!-- Parameters Grid Chips -->
+            <div class="grid grid-cols-2 gap-2 text-xs">
+                <div class="p-2.5 rounded-xl bg-darkbg border border-darkborder">
+                    <span class="text-[10px] text-slate-500 uppercase block font-medium">Gateway Endpoint</span>
+                    <span id="wg-qr-chip-endpoint" class="code-font text-white truncate block font-semibold"></span>
+                </div>
+                <div class="p-2.5 rounded-xl bg-darkbg border border-darkborder">
+                    <span class="text-[10px] text-slate-500 uppercase block font-medium">SmartDNS Gateway</span>
+                    <span class="code-font text-emerald-400 truncate block font-semibold">10.66.66.1</span>
+                </div>
+            </div>
+
+            <!-- Configuration Raw View & Copy -->
+            <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Client Configuration (.conf)</span>
+                    <button onclick="copyWGConfig()" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                        Copy Configuration
+                    </button>
+                </div>
+                <textarea id="wg-conf-preview" readonly rows="6" class="w-full bg-darkbg border border-darkborder rounded-xl p-3 text-xs code-font text-slate-300 resize-none focus:outline-none select-all"></textarea>
+            </div>
+
+            <!-- Footer Actions -->
+            <div class="flex items-center justify-between pt-2 border-t border-darkborder">
+                <button type="button" onclick="closeModal('modal-wg-qr')" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-darkbg">Close</button>
+                <div class="flex gap-2">
+                    <button type="button" onclick="copyWGConfig()" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-darkcard border border-darkborder hover:bg-darkhover text-slate-200 transition">Copy</button>
+                    <a id="wg-download-conf-btn" href="#" download class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 flex items-center gap-1.5 transition">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        <span>Download .conf</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Floating Toast -->
     <div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl bg-indigo-600 text-white text-xs font-semibold shadow-2xl transition-all duration-300 flex items-center gap-2">
         <span id="toast-message">Notification</span>
@@ -1201,6 +1484,7 @@
             'logs': 'Live DNS Query Stream',
             'settings': 'Domain & TLS Certificates',
             'redis': 'Redis Server Manager',
+            'wireguard': 'WireGuard VPN Gateway',
             'setup': 'Client Setup Guides'
         };
 
@@ -1280,6 +1564,7 @@
             if (currentTab === 'dashboard') { fetchRecentLogs(); }
             if (currentTab === 'users') fetchUsers();
             if (currentTab === 'devices') fetchAllDevices();
+            if (currentTab === 'wireguard') fetchWireGuardStatus();
             if (currentTab === 'rules') { fetchRules(); fetchPresets(); }
             if (currentTab === 'logs') fetchLogs();
             if (currentTab === 'settings') { fetchSettings(); fetchCertInfo(); }
@@ -1319,7 +1604,7 @@
                 tbody.innerHTML = '';
 
                 if (!users || users.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-500">No users found. Click "Add New User" to create one.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500">No users found. Click "Add New User" to create one.</td></tr>`;
                     return;
                 }
 
@@ -1351,6 +1636,20 @@
                             <span class="text-slate-500">/ ${u.max_devices} IPs</span>
                         </td>
                         <td class="py-3.5 px-4 text-slate-300 text-xs">${expiryText}</td>
+                        <td class="py-3.5 px-4">
+                            ${u.wg_peer ? `
+                                <button onclick="openWireGuardPeerModal('${escapeHtml(u.wg_peer)}')" class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-indigo-500/10 border border-indigo-500/30 hover:bg-indigo-500/20 text-indigo-300 font-medium transition" title="Show QR Code & Config">
+                                    <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                                    <span class="truncate max-w-[90px]">${escapeHtml(u.wg_peer)}</span>
+                                    <span class="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 rounded font-bold">QR</span>
+                                </button>
+                            ` : `
+                                <button onclick="createPeerForUser('${escapeHtml(u.token)}', '${escapeHtml(u.username)}')" class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-darkcard border border-darkborder hover:border-indigo-500/40 hover:bg-darkhover text-slate-400 hover:text-white font-medium transition" title="Provision WireGuard tunnel for this client">
+                                    <svg class="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                    <span>Enable VPN</span>
+                                </button>
+                            `}
+                        </td>
                         <td class="py-3.5 px-4">
                             <button onclick="openQuickSetup('${escapeHtml(u.token)}', '${escapeHtml(u.username)}')" class="px-2.5 py-1 text-xs rounded-lg bg-darkcard border border-darkborder hover:bg-darkhover text-indigo-400 font-medium">
                                 View Setup
@@ -2076,14 +2375,51 @@
             }
         });
 
-        // Quick setup & session killing
-        function openQuickSetup(token, username) {
+        async function openQuickSetup(token, username) {
             document.getElementById('setup-modal-user').textContent = username;
             document.getElementById('setup-android-endpoint').textContent = `${token}.${serverBaseDomain}`;
             document.getElementById('setup-doh-endpoint').textContent = `https://${serverBaseDomain}:8443/dns-query/${token}`;
 
             document.getElementById('setup-ios-dot-btn').href = `/api/user/${token}/mobileconfig?protocol=dot`;
             document.getElementById('setup-ios-doh-btn').href = `/api/user/${token}/mobileconfig?protocol=doh`;
+
+            const wgBadge = document.getElementById('setup-modal-wg-badge');
+            const wgBtn = document.getElementById('setup-modal-wg-btn');
+            if (wgBadge && wgBtn) {
+                wgBadge.className = "text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20";
+                wgBadge.textContent = "Checking...";
+                try {
+                    const res = await fetch(`/api/users/${token}/wireguard`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.has_peer) {
+                            wgBadge.className = "text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                            wgBadge.textContent = "Peer: " + data.peer_name;
+                            wgBtn.onclick = () => {
+                                closeModal('modal-quick-setup');
+                                openWireGuardPeerModal(data.peer_name);
+                            };
+                            wgBtn.innerHTML = `
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                                <span>Show WireGuard QR Code & .conf</span>
+                            `;
+                        } else {
+                            wgBadge.className = "text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20";
+                            wgBadge.textContent = "Not Configured";
+                            wgBtn.onclick = () => {
+                                closeModal('modal-quick-setup');
+                                createPeerForUser(token, username);
+                            };
+                            wgBtn.innerHTML = `
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                <span>Enable WireGuard VPN for ${escapeHtml(username)}</span>
+                            `;
+                        }
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }
 
             document.getElementById('modal-quick-setup').classList.remove('hidden');
         }
@@ -2160,6 +2496,7 @@
             const max_devices = parseInt(document.getElementById('create-max-devices').value, 10);
             const duration = document.getElementById('create-duration').value;
             const notes = document.getElementById('create-notes').value.trim();
+            const enableWG = document.getElementById('create-enable-wireguard')?.checked;
 
             let expires_at = 0;
             const now = Math.floor(Date.now() / 1000);
@@ -2182,7 +2519,11 @@
                     showToast(`User created: ${data.username}`);
                     fetchUsers();
                     fetchStats();
-                    openQuickSetup(data.token, data.username);
+                    if (enableWG) {
+                        createPeerForUser(data.token, data.username);
+                    } else {
+                        openQuickSetup(data.token, data.username);
+                    }
                 } else {
                     showToast(data.error || 'Failed to create user', true);
                 }
@@ -2219,6 +2560,333 @@
             }
         });
 
+        // ==================== WIREGUARD VPN CONTROLLER ====================
+        let currentWGStatus = null;
+        let allWGPeers = [];
+
+        async function fetchWireGuardStatus() {
+            try {
+                const res = await fetch('/api/wireguard/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                currentWGStatus = data;
+                allWGPeers = data.peers || [];
+
+                // Update Badges & Counters
+                const badgeCount = document.getElementById('badge-wireguard-count');
+                if (badgeCount) badgeCount.textContent = (data.total_peers || 0).toLocaleString();
+                const statPeers = document.getElementById('wg-stat-peers-count');
+                if (statPeers) statPeers.textContent = (data.total_peers || 0).toLocaleString();
+
+                // Status Badge & Dot
+                const statusBadge = document.getElementById('wg-status-badge');
+                const statusDot = document.getElementById('wg-status-dot');
+                const statusText = document.getElementById('wg-status-text');
+                const headerBadge = document.getElementById('header-wg-badge');
+                const headerDot = document.getElementById('header-wg-dot');
+
+                if (data.active) {
+                    if (statusBadge) statusBadge.className = 'px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5';
+                    if (statusDot) statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+                    if (statusText) statusText.textContent = 'Interface Active (wg0)';
+                    if (headerBadge) headerBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-medium hover:bg-indigo-500/20 transition cursor-pointer';
+                    if (headerDot) headerDot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
+                } else {
+                    if (statusBadge) statusBadge.className = 'px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1.5';
+                    if (statusDot) statusDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+                    if (statusText) statusText.textContent = 'Interface Inactive';
+                    if (headerBadge) headerBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-darkcard border border-darkborder text-slate-400 font-medium hover:bg-darkhover transition cursor-pointer';
+                    if (headerDot) headerDot.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+                }
+
+                // Subnet & Endpoint
+                if (data.subnet) {
+                    const subEl = document.getElementById('wg-stat-subnet');
+                    if (subEl) subEl.textContent = data.subnet;
+                }
+                if (data.public_ipv4 && data.port) {
+                    const epEl = document.getElementById('wg-stat-endpoint');
+                    if (epEl) epEl.textContent = `${data.public_ipv4}:${data.port}`;
+                }
+
+                // Server PubKey
+                const pubKeyEl = document.getElementById('wg-stat-pubkey-short');
+                if (pubKeyEl) {
+                    if (data.server_pub_key) {
+                        const k = data.server_pub_key;
+                        pubKeyEl.textContent = k.length > 16 ? `${k.substring(0, 8)}...${k.substring(k.length - 6)}` : k;
+                        pubKeyEl.dataset.fullKey = k;
+                    } else {
+                        pubKeyEl.textContent = 'Not initialized';
+                    }
+                }
+
+                renderWireGuardPeers(allWGPeers);
+            } catch (e) {
+                console.error('Failed to fetch WireGuard status:', e);
+            }
+        }
+
+        function copyServerPubKey() {
+            const pubKeyEl = document.getElementById('wg-stat-pubkey-short');
+            const fullKey = pubKeyEl?.dataset?.fullKey;
+            if (fullKey) {
+                navigator.clipboard.writeText(fullKey).then(() => showToast('Server public key copied!'));
+            } else {
+                showToast('No public key available', true);
+            }
+        }
+
+        function filterWireGuardPeers() {
+            const query = (document.getElementById('wg-peers-filter')?.value || '').toLowerCase().trim();
+            if (!query) {
+                renderWireGuardPeers(allWGPeers);
+                return;
+            }
+            const filtered = allWGPeers.filter(p =>
+                (p.name && p.name.toLowerCase().includes(query)) ||
+                (p.tunnel_ip && p.tunnel_ip.toLowerCase().includes(query)) ||
+                (p.username && p.username.toLowerCase().includes(query)) ||
+                (p.user_token && p.user_token.toLowerCase().includes(query))
+            );
+            renderWireGuardPeers(filtered);
+        }
+
+        function renderWireGuardPeers(peers) {
+            const tbody = document.getElementById('wg-peers-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            if (!peers || peers.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-500">No WireGuard peers found. Click "New WireGuard Peer" to generate one.</td></tr>`;
+                return;
+            }
+
+            peers.forEach(p => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-darkpanel/50 transition';
+
+                // Handshake indicator
+                const nowSec = Math.floor(Date.now() / 1000);
+                const isRecent = p.latest_handshake > 0 && (nowSec - p.latest_handshake) < 180;
+                const handshakeBadge = p.latest_handshake > 0 ? (
+                    isRecent ?
+                    `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        ${escapeHtml(p.latest_handshake_human)}
+                    </span>` :
+                    `<span class="text-xs text-slate-400">${escapeHtml(p.latest_handshake_human)}</span>`
+                ) : `<span class="text-xs text-slate-600">Never</span>`;
+
+                const userBadge = p.username ? `
+                    <div class="font-medium text-white">${escapeHtml(p.username)}</div>
+                    <div class="text-[11px] text-slate-500 code-font">${escapeHtml(p.user_token || '')}</div>
+                ` : `<span class="px-2 py-0.5 rounded text-[10px] bg-darkcard text-slate-400 border border-darkborder font-medium">Standalone</span>`;
+
+                const pubKeyShort = p.public_key ? (p.public_key.length > 12 ? `${p.public_key.substring(0, 6)}...${p.public_key.substring(p.public_key.length - 4)}` : p.public_key) : '-';
+
+                tr.innerHTML = `
+                    <td class="py-3.5 px-4">
+                        <div class="font-semibold text-white flex items-center gap-1.5">
+                            <svg class="w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                            <span>${escapeHtml(p.name)}</span>
+                        </div>
+                        <div class="text-[10px] text-slate-500 code-font cursor-pointer hover:text-slate-300 mt-0.5" onclick="navigator.clipboard.writeText('${escapeHtml(p.public_key)}'); showToast('Public key copied!');" title="Click to copy public key">${escapeHtml(pubKeyShort)}</div>
+                    </td>
+                    <td class="py-3.5 px-4">${userBadge}</td>
+                    <td class="py-3.5 px-4 font-semibold text-emerald-400 code-font text-xs">${escapeHtml(p.tunnel_ip || '-')}</td>
+                    <td class="py-3.5 px-4">${handshakeBadge}</td>
+                    <td class="py-3.5 px-4 text-xs">
+                        <span class="text-emerald-400 font-medium">↓ ${escapeHtml(p.transfer_rx_human || '0 B')}</span>
+                        <span class="text-slate-500 mx-1">&bull;</span>
+                        <span class="text-indigo-400 font-medium">↑ ${escapeHtml(p.transfer_tx_human || '0 B')}</span>
+                    </td>
+                    <td class="py-3.5 px-4 text-right space-x-1">
+                        <button onclick="openWireGuardPeerModal('${escapeHtml(p.name)}')" class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 hover:bg-indigo-600/20 font-medium transition" title="Show QR Code">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                            <span>QR Code</span>
+                        </button>
+                        <a href="/api/wireguard/peers/${encodeURIComponent(p.name)}/download" download class="p-1.5 text-slate-400 hover:text-white rounded hover:bg-darkcard inline-block align-middle" title="Download .conf file">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        </a>
+                        <button onclick="deleteWireGuardPeer('${escapeHtml(p.name)}')" class="p-1.5 text-slate-400 hover:text-red-400 rounded hover:bg-darkcard inline-block align-middle" title="Revoke & Delete Peer">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function openCreateWGPeerModal() {
+            const select = document.getElementById('wg-new-peer-user');
+            if (select) {
+                select.innerHTML = '<option value="">-- Standalone / Infrastructure Peer --</option>';
+                try {
+                    const res = await fetch('/api/users');
+                    if (res.ok) {
+                        const users = await res.json();
+                        users.forEach(u => {
+                            const opt = document.createElement('option');
+                            opt.value = u.token;
+                            opt.textContent = `${u.username} (${u.token})${u.wg_peer ? ' [Has Peer: ' + u.wg_peer + ']' : ''}`;
+                            select.appendChild(opt);
+                        });
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+            document.getElementById('wg-new-peer-name').value = '';
+            openModal('modal-create-wg-peer');
+        }
+
+        async function handleCreateWGPeer(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-submit-create-wg-peer');
+            const originalHTML = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="animate-spin mr-1.5">&circlearrowright;</span> Generating...`;
+
+            const name = document.getElementById('wg-new-peer-name').value.trim();
+            const user_token = document.getElementById('wg-new-peer-user').value.trim();
+
+            try {
+                const res = await fetch('/api/wireguard/peers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, user_token })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    closeModal('modal-create-wg-peer');
+                    showToast(`WireGuard peer created: ${data.name}`);
+                    fetchWireGuardStatus();
+                    fetchUsers();
+                    openWireGuardPeerModal(data.name);
+                } else {
+                    showToast(data.error || 'Failed to create peer', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+            }
+        }
+
+        async function createPeerForUser(userToken, username) {
+            showToast(`Generating WireGuard peer for ${username}...`);
+            const peerName = sanitizePeerNameJs(`usr_${username}_${userToken.substring(0, 6)}`);
+            try {
+                const res = await fetch('/api/wireguard/peers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: peerName, user_token: userToken })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(`WireGuard peer assigned to ${username}!`);
+                    fetchUsers();
+                    fetchWireGuardStatus();
+                    openWireGuardPeerModal(data.name);
+                } else {
+                    showToast(data.error || 'Failed to provision peer', true);
+                }
+            } catch (err) {
+                showToast(err.message, true);
+            }
+        }
+
+        function sanitizePeerNameJs(s) {
+            return (s || '').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'peer';
+        }
+
+        async function openWireGuardPeerModal(peerName) {
+            if (!peerName) return;
+            try {
+                const res = await fetch(`/api/wireguard/peers/${encodeURIComponent(peerName)}`);
+                if (!res.ok) {
+                    showToast('Failed to load peer details', true);
+                    return;
+                }
+                const data = await res.json();
+                document.getElementById('wg-qr-modal-name').textContent = data.name;
+
+                // Extract IP from conf if present
+                let ipMatch = data.conf.match(/Address\s*=\s*([0-9\.\/]+)/);
+                const assignedIP = ipMatch ? ipMatch[1] : '10.66.66.x';
+                document.getElementById('wg-qr-modal-ip').textContent = assignedIP;
+
+                let endpointMatch = data.conf.match(/Endpoint\s*=\s*([^\r\n]+)/);
+                document.getElementById('wg-qr-chip-endpoint').textContent = endpointMatch ? endpointMatch[1] : `${serverIPv4}:51820`;
+
+                // Set Raw Configuration
+                document.getElementById('wg-conf-preview').value = data.conf;
+
+                // Set Download Button href
+                const dlBtn = document.getElementById('wg-download-conf-btn');
+                dlBtn.href = `/api/wireguard/peers/${encodeURIComponent(data.name)}/download`;
+                dlBtn.setAttribute('download', `${data.name}.conf`);
+
+                // Set SVG QR Image
+                const qrImg = document.getElementById('wg-qr-image');
+                qrImg.src = `/api/wireguard/peers/${encodeURIComponent(data.name)}/qr.svg?t=${Date.now()}`;
+
+                openModal('modal-wg-qr');
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        function copyWGConfig() {
+            const conf = document.getElementById('wg-conf-preview').value;
+            if (conf) {
+                navigator.clipboard.writeText(conf).then(() => showToast('WireGuard configuration copied!'));
+            }
+        }
+
+        async function deleteWireGuardPeer(peerName) {
+            if (!confirm(`Are you sure you want to revoke and delete WireGuard peer "${peerName}"?`)) return;
+            try {
+                const res = await fetch(`/api/wireguard/peers/${encodeURIComponent(peerName)}`, { method: 'DELETE' });
+                if (res.ok) {
+                    showToast(`Peer "${peerName}" revoked.`);
+                    fetchWireGuardStatus();
+                    fetchUsers();
+                } else {
+                    const data = await res.json();
+                    showToast(data.error || 'Failed to delete peer', true);
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            }
+        }
+
+        async function initWireGuardService() {
+            const btn = document.getElementById('btn-sync-wg');
+            if (btn) btn.innerHTML = `<span class="animate-spin mr-1.5">&circlearrowright;</span> Syncing...`;
+            try {
+                const res = await fetch('/api/wireguard/init', { method: 'POST' });
+                if (res.ok) {
+                    showToast('WireGuard service synced and reloaded!');
+                    fetchWireGuardStatus();
+                } else {
+                    showToast('Failed to restart WireGuard', true);
+                }
+            } catch (e) {
+                showToast(e.message, true);
+            } finally {
+                if (btn) {
+                    btn.innerHTML = `
+                        <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        Sync / Restart wg0
+                    `;
+                }
+            }
+        }
+
         async function handleLogout() {
             await fetch('/api/logout', { method: 'POST' });
             window.location.href = '/login';
@@ -2250,6 +2918,9 @@
             }
             if (currentTab === 'dashboard') {
                 fetchRecentLogs();
+            }
+            if (currentTab === 'wireguard') {
+                fetchWireGuardStatus();
             }
         }, 3000);
     </script>

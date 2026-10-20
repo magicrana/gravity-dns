@@ -106,6 +106,16 @@ func (s *Server) Start() error {
 		protected.Delete("/api/users/{token}", api.handleDeleteUser)
 		protected.Post("/api/users/{token}/kill-sessions", api.handleKillSessions)
 		protected.Get("/api/users/{token}/devices", api.handleGetUserDevices)
+		protected.Get("/api/users/{token}/wireguard", api.handleGetUserWireGuard)
+
+		// WireGuard VPN Management
+		protected.Get("/api/wireguard/status", api.handleGetWireGuardStatus)
+		protected.Post("/api/wireguard/init", api.handleInitWireGuard)
+		protected.Post("/api/wireguard/peers", api.handleCreateWireGuardPeer)
+		protected.Get("/api/wireguard/peers/{name}", api.handleGetWireGuardPeer)
+		protected.Get("/api/wireguard/peers/{name}/qr.svg", api.handleGetWireGuardQRCode)
+		protected.Get("/api/wireguard/peers/{name}/download", api.handleDownloadWireGuardConf)
+		protected.Delete("/api/wireguard/peers/{name}", api.handleDeleteWireGuardPeer)
 
 		// Domain Hijack Rules & Streaming Presets
 		protected.Get("/api/rules", api.handleGetRules)

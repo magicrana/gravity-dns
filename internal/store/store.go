@@ -102,6 +102,7 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 		"expires_at":  u.ExpiresAt,
 		"created_at":  u.CreatedAt,
 		"notes":       u.Notes,
+		"wg_peer":     u.WGPeer,
 	})
 
 	_, err = pipe.Exec(ctx)
@@ -134,6 +135,7 @@ func (s *Store) GetUser(ctx context.Context, token string) (*User, error) {
 		ExpiresAt:  expAt,
 		CreatedAt:  creatAt,
 		Notes:      vals["notes"],
+		WGPeer:     vals["wg_peer"],
 	}, nil
 }
 
@@ -154,8 +156,21 @@ func (s *Store) UpdateUser(ctx context.Context, u *User) error {
 		"max_devices": u.MaxDevices,
 		"expires_at":  u.ExpiresAt,
 		"notes":       u.Notes,
+		"wg_peer":     u.WGPeer,
 	}
 	return s.client.HSet(ctx, userKey, fields).Err()
+}
+
+// SetUserWGPeer associates a WireGuard peer with a user.
+func (s *Store) SetUserWGPeer(ctx context.Context, token, peerName string) error {
+	userKey := fmt.Sprintf("user:%s", token)
+	return s.client.HSet(ctx, userKey, "wg_peer", peerName).Err()
+}
+
+// ClearUserWGPeer removes the WireGuard peer association from a user.
+func (s *Store) ClearUserWGPeer(ctx context.Context, token string) error {
+	userKey := fmt.Sprintf("user:%s", token)
+	return s.client.HDel(ctx, userKey, "wg_peer").Err()
 }
 
 // DeleteUser removes a user and flushes their active sessions.

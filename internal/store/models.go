@@ -12,6 +12,7 @@ type User struct {
 	CreatedAt     int64  `json:"created_at"`
 	Notes         string `json:"notes"`
 	ActiveDevices int    `json:"active_devices,omitempty"`
+	WGPeer        string `json:"wg_peer,omitempty"` // Associated WireGuard peer name
 }
 
 // IsActive checks if the user is enabled and not expired.
